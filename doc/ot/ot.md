@@ -78,9 +78,12 @@ Table of Contents
   >
   > GPU도 제조사마다 사양과 환경이 다르기 때문에 필요하다. 따라서, 우리는 GPU 작업을 위해 Direct X 라이브러리를 사용하고 GPU 제조사는 Microsoft와 협력해서 GPU를 제작한다.
 - 렌더링 파이프라인
-  ![dx12-rendering-pipeline](res/dx12-rendering-pipeline.png)
 
-  |                                                                    |                                              |
+  |               DirectX 12의 렌더링 파이프라인                |
+  | :---------------------------------------------------------: |
+  | ![dx12-rendering-pipeline](res/dx12-rendering-pipeline.png) |
+
+  | Stage                                                              | 설명                                         |
   | :----------------------------------------------------------------- | :------------------------------------------- |
   | `Input Assembler` Stage                                            | 정점 정보 전달                               |
   | `Vertex Shader(VS)` Stage                                          | 정점 연산 처리                               |
