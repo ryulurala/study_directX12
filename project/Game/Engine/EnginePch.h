@@ -41,3 +41,20 @@ using Vec2		= XMFLOAT2;
 using Vec3		= XMFLOAT3;
 using Vec4		= XMFLOAT4;
 using Matrix	= XMMATRIX;
+
+enum
+{
+	SWAP_CHAIN_BUFFER_COUNT = 2,
+};
+
+struct WindowInfo
+{
+	HWND	hwnd;		// 출력 윈도우
+	int32	width;		// 너비
+	int32	height;		// 높이
+	bool	windowed;	// 창 or 전체화면
+};
+
+class Engine;	// 전방 선언
+
+extern unique_ptr<Engine> GEngine;	// 외부 전역 변수 선언

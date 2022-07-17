@@ -1,10 +1,14 @@
 #include "pch.h"
 #include "Game.h"
 
-void Game::Init()
+#include "Engine.h"
+
+void Game::Init(const WindowInfo& window)
 {
+	GEngine->Init(window);
 }
 
 void Game::Update()
 {
+	GEngine->Render();
 }

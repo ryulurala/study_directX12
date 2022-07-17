@@ -10,6 +10,8 @@
 #define MAX_LOADSTRING 100
 
 // 전역 변수:
+WindowInfo GWindowInfo;
+
 HINSTANCE hInst;                                // 현재 인스턴스입니다.
 WCHAR szTitle[MAX_LOADSTRING];                  // 제목 표시줄 텍스트입니다.
 WCHAR szWindowClass[MAX_LOADSTRING];            // 기본 창 클래스 이름입니다.
@@ -45,9 +47,13 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 
     MSG msg;
 
+    GWindowInfo.width = 800;
+    GWindowInfo.height = 600;
+    GWindowInfo.windowed = true;
+
     // 게임 생성 후 초기화
     unique_ptr<Game> game = make_unique<Game>();    // Smart-pointer 사용
-    game->Init();
+    game->Init(GWindowInfo);
 
     while (true)
     {
@@ -123,6 +129,8 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 
    ShowWindow(hWnd, nCmdShow);
    UpdateWindow(hWnd);
+
+   GWindowInfo.hwnd = hWnd;
 
    return TRUE;
 }
