@@ -1209,9 +1209,9 @@ Table of Contents
 
 - 결과
 
-  |    장치 초기화 결과     |
-  | :---------------------: |
-  | ![device-init-result]() |
+  |                 장치 초기화 결과                  |
+  | :-----------------------------------------------: |
+  | ![device-init-result](res/device-init-result.png) |
 
 ---
 
