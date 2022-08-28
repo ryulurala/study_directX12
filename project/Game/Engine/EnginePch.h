@@ -3,6 +3,7 @@
 #include <windows.h>
 #include <tchar.h>
 #include <memory>
+#include <string>
 #include <vector>
 #include <array>
 #include <list>
@@ -59,5 +60,8 @@ class Engine;	// 전방 선언
 
 extern unique_ptr<Engine> GEngine;	// 외부 전역 변수 선언
 
-#define DEVICE		GEngine->GetDevice()->GetDevice()
-#define CMD_LIST	GEngine->GetCmdQueue()->GetCmdList()
+struct Vertex
+{
+	Vec3 pos;	// x, y, z
+	Vec4 color;	// R, G, B, A
+};
