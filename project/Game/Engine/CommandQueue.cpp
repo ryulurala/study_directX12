@@ -2,7 +2,6 @@
 #include "CommandQueue.h"
 
 #include "SwapChain.h"
-#include "DescriptorHeap.h"
 
 CommandQueue::~CommandQueue()
 {
@@ -10,10 +9,9 @@ CommandQueue::~CommandQueue()
 	::CloseHandle(_fenceEvent);
 }
 
-void CommandQueue::Init(ComPtr<ID3D12Device> device, shared_ptr<SwapChain> swapChain, shared_ptr<DescriptorHeap> descHeap)
+void CommandQueue::Init(ComPtr<ID3D12Device> device, shared_ptr<SwapChain> swapChain)
 {
 	_swapChain = swapChain;
-	_descHeap = descHeap;
 	
 	D3D12_COMMAND_QUEUE_DESC queueDesc = {};
 	queueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
@@ -68,7 +66,7 @@ void CommandQueue::RenderBegin(const D3D12_VIEWPORT* vp, const D3D12_RECT* rect)
 
 	// Back Buffer Resource를 "화면 출력용"에서 "외주 결과물"로 변경 예약
 	D3D12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-		_swapChain->GetCurrentBackBufferResource().Get(),	// Back Buffer Resource
+		_swapChain->GetBackRTVBuffer().Get(),	// Back Buffer Resource
 		D3D12_RESOURCE_STATE_PRESENT,			// before. 화면 출력
 		D3D12_RESOURCE_STATE_RENDER_TARGET		// after. 외주 결과물
 	);
@@ -83,7 +81,7 @@ void CommandQueue::RenderBegin(const D3D12_VIEWPORT* vp, const D3D12_RECT* rect)
 	
 	// 렌더할 버퍼 구체화.
 	// GPU에게 결과물을 계산해달라고 요청 명령 삽입
-	D3D12_CPU_DESCRIPTOR_HANDLE backBufferView = _descHeap->GetBackBufferView();
+	D3D12_CPU_DESCRIPTOR_HANDLE backBufferView = _swapChain->GetBackRTV();
 	_cmdList->ClearRenderTargetView(backBufferView, Colors::LightSteelBlue, 0, nullptr);
 	_cmdList->OMSetRenderTargets(1, &backBufferView, FALSE, nullptr);
 }
@@ -92,7 +90,7 @@ void CommandQueue::RenderEnd()
 {
 	// Back Buffer Resource를 "외주 결과물"에서 "화면 출력용"으로 변경 예약
 	D3D12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-		_swapChain->GetCurrentBackBufferResource().Get(),
+		_swapChain->GetBackRTVBuffer().Get(),
 		D3D12_RESOURCE_STATE_RENDER_TARGET,		// before. 외주 결과물
 		D3D12_RESOURCE_STATE_PRESENT			// after. 화면 출력
 	);

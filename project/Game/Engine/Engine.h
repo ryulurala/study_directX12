@@ -20,6 +20,5 @@ private:
 	shared_ptr<class Device> _device;
 	shared_ptr<class CommandQueue> _cmdQueue;
 	shared_ptr<class SwapChain> _swapChain;
-	shared_ptr<class DescriptorHeap> _descHeap;
 };
 

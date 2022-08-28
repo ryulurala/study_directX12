@@ -8,7 +8,7 @@ class CommandQueue
 public:
 	~CommandQueue();
 
-	void Init(ComPtr<ID3D12Device> device, shared_ptr<SwapChain> swapChain, shared_ptr<DescriptorHeap> descHeap);
+	void Init(ComPtr<ID3D12Device> device, shared_ptr<SwapChain> swapChain);
 	
 	void WaitSync();		// Fence를 이용해 동기화를 위한 함수
 
@@ -32,7 +32,6 @@ private:
 	HANDLE					_fenceEvent = INVALID_HANDLE_VALUE;
 
 	shared_ptr<SwapChain>		_swapChain;
-	shared_ptr<DescriptorHeap>	_descHeap;
 
 };
 
