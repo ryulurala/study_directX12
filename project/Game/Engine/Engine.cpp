@@ -1,10 +1,6 @@
 ﻿#include "pch.h"
 #include "Engine.h"
 
-#include "Device.h"
-#include "CommandQueue.h"
-#include "SwapChain.h"
-
 void Engine::Init(const WindowInfo& window)
 {
 	_window = window;

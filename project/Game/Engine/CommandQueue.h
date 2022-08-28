@@ -16,6 +16,7 @@ public:
 	void RenderEnd();
 
 	ComPtr<ID3D12CommandQueue> GetCmdQueue() const { return _cmdQueue; }
+	ComPtr< ID3D12GraphicsCommandList> GetCmdList() const{ return _cmdList; }
 
 private:
 	// CommandQueue: DX12에 등장
