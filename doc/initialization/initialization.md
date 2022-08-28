@@ -301,6 +301,7 @@ Table of Contents
      #include <windows.h>
      #include <tchar.h>
      #include <memory>
+     #include <string>
      #include <vector>
      #include <array>
      #include <list>
@@ -1216,6 +1217,587 @@ Table of Contents
 ---
 
 ## 삼각형 띄우기
+
+### Descriptor Heap 삭제: Swap Chain이 관리
+
+- `DescriptorHeap.h`, `DescriptorHeap.cpp` 삭제
+
+- SwapChain.h
+
+  > `Init()` -> `CreateSwapChain()`, `CreateRTV()`로 분리
+  >
+  > `GetCurrentBackBufferResource()` -> `GetBackRTVBuffer()`
+  >
+  > `GetBackRTV()` 추가
+  >
+  > `_renderTargets` ->`_rtvBuffer`
+
+  ```cpp
+  ...
+
+  class SwapChain
+  {
+  public:
+      void Init(const WindowInfo& info, ComPtr<ID3D12Device> device, ComPtr<IDXGIFactory> dxgi, ComPtr<ID3D12CommandQueue> cmdQueue);
+
+      ...
+      ComPtr<ID3D12Resource> GetRenderTarget(int32 index) const { return _rtvBuffer[index]; }
+
+      ComPtr<ID3D12Resource> GetBackRTVBuffer() const { return _rtvBuffer[_backBufferIndex]; }
+
+      D3D12_CPU_DESCRIPTOR_HANDLE GetBackRTV() const { return _rtvHandle[_backBufferIndex]; }
+
+  private:
+      void CreateSwapChain(const WindowInfo& info, ComPtr<IDXGIFactory> dxgi, ComPtr<ID3D12CommandQueue> cmdQueue);
+      void CreateRTV(ComPtr<ID3D12Device> device);    // Descriptor Heap의 Init 내용
+
+  private:
+      ...
+
+      ComPtr<ID3D12Resource>  _rtvBuffer[SWAP_CHAIN_BUFFER_COUNT];  // EnginePch에 매크로 선언
+      uint32                  _backBufferIndex = 0;                 // 0 or 1
+
+      // Render Target View
+      ComPtr<ID3D12DescriptorHeap>  _rtvHeap;
+      D3D12_CPU_DESCRIPTOR_HANDLE   _rtvHandle[SWAP_CHAIN_BUFFER_COUNT];
+  }
+  ```
+
+- SwapChain.cpp
+
+  ```cpp
+  ...
+
+  void SwapChain::Init(const WindowInfo& info, ComPtr<ID3D12Device> device, ComPtr<IDXGIFactory> dxgi, ComPtr<ID3D12CommandQueue> cmdQueue)
+  {
+      CreateSwapChain(info, dxgi, cmdQueue);
+      CreateRTV(device);
+  }
+
+  ...
+
+  void SwapChain::CreateSwapChain(const WindowInfo& info, ComPtr<IDXGIFactory> dxgi, ComPtr<ID3D12CommandQueue> cmdQueue)
+  {
+      // 이전 내용은 Clear
+      _swapChain.Reset();
+
+      DXGI_SWAP_CHAIN_DESC sd;
+      sd.BufferDesc.Width = static_cast<uint32>(info.width);    // 버퍼의 해상도 너비
+      sd.BufferDesc.Height = static_cast<uint32>(info.height);  // 버퍼의 해상도 높이
+      @@ -29,16 +46,33 @@ void SwapChain::Init(const WindowInfo& info, ComPtr<IDXGIFactory> dxgi, ComPtr<I
+
+      // 앞서 생성한 버퍼를 _renderTargets에 저장
+      for (int32 i = 0; i < SWAP_CHAIN_BUFFER_COUNT; i++)
+          _swapChain->GetBuffer(i, IID_PPV_ARGS(&_rtvBuffer[i]));
+  }
+
+  void SwapChain::CreateRTV(ComPtr<ID3D12Device> device)
+  {
+      // RTV(Render Target View) 크기 계산
+      int32 rtvHeapSize = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+
+      D3D12_DESCRIPTOR_HEAP_DESC rtvDesc;
+      rtvDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
+      rtvDesc.NumDescriptors = SWAP_CHAIN_BUFFER_COUNT;
+      rtvDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+      rtvDesc.NodeMask = 0;
+
+      // 이 시점에 rtvHeap 배열 생성
+      device->CreateDescriptorHeap(&rtvDesc, IID_PPV_ARGS(&_rtvHeap));
+
+      // rtvHeap의 시작 주소 값을 가져오기
+      D3D12_CPU_DESCRIPTOR_HANDLE rtvHeapBegin = _rtvHeap->GetCPUDescriptorHandleForHeapStart();
+
+      for (int i = 0; i < SWAP_CHAIN_BUFFER_COUNT; i++)
+      {
+          // "CD~"(from. d3dx12.h)
+          // RTV 배열: [_rtvHeapBegin] [_rtvHeapBegin + (i * _rtvHeapSize)]
+          _rtvHandle[i] = CD3DX12_CPU_DESCRIPTOR_HANDLE(rtvHeapBegin, i * rtvHeapSize);
+
+          // Descriptor Heap으로 rtv(Render Target View) 생성
+          device->CreateRenderTargetView(_rtvBuffer[i].Get(), nullptr, _rtvHandle[i]);
+      }
+  }
+
+  ```
+
+- Engine.h
+
+  > `shared_ptr<class DescriptorHeap> _descHeap;` 삭제
+
+- Engine.cpp
+
+  > `#include DescriptorHeap.h` 삭제
+  >
+  > DescriptorHeap의 Init 지우고, SwapChain에 Device 넘겨주기
+
+  ```cpp
+  void Engine::Init(const WindowInfo& window)
+  {
+      _cmdQueue->Init(_device->GetDevice(), _swapChain);    // Descriptor Heap 넘기는 건 취소
+      _swapChain->Init(window, _device->GetDevice(), _device->GetDXGI(), _cmdQueue->GetCmdQueue()); // Device 넘겨주기
+  }
+  ```
+
+- CommandQueue.h
+
+  > Init() 경우 Descriptor Heap 넘겨받지 않기
+  >
+  > Descriptor Heap 캐싱 취소
+  >
+  > `GetCurrentBackBufferResource()` -> `GetBackRTVBuffer()`
+  >
+  > `GetBackRTV()` 추가
+
+  ```cpp
+  public:
+      void Init(ComPtr<ID3D12Device> device, shared_ptr<SwapChain> swapChain);
+  ```
+
+- CommandQueue.cpp
+
+  > `#include "DescriptorHeap.h" 삭제
+
+  ```cpp
+  void CommandQueue::RenderBegin(const D3D12_VIEWPORT* vp, const D3D12_RECT* rect)
+  {
+      ...
+
+      // Back Buffer Resource를 "화면 출력용"에서 "외주 결과물"로 변경 예약
+      D3D12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+          _swapChain->GetBackRTVBuffer().Get(), // Back Buffer Resource
+          D3D12_RESOURCE_STATE_PRESENT,         // before. 화면 출력
+          D3D12_RESOURCE_STATE_RENDER_TARGET    // after. 외주 결과물
+      );
+
+      ...
+
+      // 렌더할 버퍼 구체화.
+      // GPU에게 결과물을 계산해달라고 요청 명령 삽입
+      D3D12_CPU_DESCRIPTOR_HANDLE backBufferView = _swapChain->GetBackRTV();
+      ...
+
+      // Back Buffer Resource를 "외주 결과물"에서 "화면 출력용"으로 변경 예약
+      D3D12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+          _swapChain->GetBackRTVBuffer().Get(),
+          D3D12_RESOURCE_STATE_RENDER_TARGET,   // before. 외주 결과물
+          D3D12_RESOURCE_STATE_PRESENT          // after. 화면 출력
+      );
+  }
+  ```
+
+### RootSignature
+
+- 계약서, 결재 단계
+- GPU로 데이터를 전달할 때 어떤 레지스터, 버퍼를 활용하라고 명시
+
+- RootSignature.h
+
+  ```cpp
+  #pragma once
+
+  class RootSignature
+  {
+  public:
+      void Init(ComPtr<ID3D12Device> device);
+
+      ComPtr<ID3D12RootSignature> GetSignature() const { return _signature; }
+
+  private:
+      ComPtr<ID3D12RootSignature> _signature;
+  };
+
+  ```
+
+- RootSignature.cpp
+
+  ```cpp
+  #include "pch.h"
+  #include "RootSignature.h"
+
+  void RootSignature::Init(ComPtr<ID3D12Device> device)
+  {
+      D3D12_ROOT_SIGNATURE_DESC sigDesc = CD3DX12_ROOT_SIGNATURE_DESC(D3D12_DEFAULT);
+      sigDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;   // 임력 조립기 단계
+
+      ComPtr<ID3DBlob> blobSignature;
+      ComPtr<ID3DBlob> blobError;
+      ::D3D12SerializeRootSignature(&sigDesc, D3D_ROOT_SIGNATURE_VERSION_1, &blobSignature, &blobError);
+      device->CreateRootSignature(0, blobSignature->GetBufferPointer(), blobSignature->GetBufferSize(), IID_PPV_ARGS(&_signature));
+  }
+
+  ```
+
+- Engine.h
+
+  ```cpp
+  ...
+
+  #include "RootSignature.h"
+
+  ...
+
+  public:
+      ...
+
+      shared_ptr<class RootSignature> GetRootSignature() const { return _rootSignature; }
+
+  ...
+
+  private:
+      ...
+
+      shared_ptr<RootSignature> _rootSignature;
+
+  ```
+
+- Engine.cpp
+
+  ```cpp
+  void Engine::Init(const WindowInfo& window)
+  {
+      ...
+
+      _rootSignature = make_shared<RootSignature>();
+
+      ...
+      _rootSignature->Init(_device->GetDevice());
+  }
+  ```
+
+### Mesh
+
+- 정점으로 이루어진 물체
+
+- EnginePch.h
+
+  > Vertex 구조체 추가
+
+  ```cpp
+  ...
+
+  struct Vertex
+  {
+      Vec3 pos;   // x, y, z
+      Vec4 color; // R, G, B, A
+  };
+  ```
+
+- CommandQueue.h
+
+  > Get Command List 추가
+
+  ```cpp
+
+  public:
+      ComPtr< ID3D12GraphicsCommandList> GetCmdList() const{ return _cmdList; }
+
+  ```
+
+- Mesh.h
+
+  ```cpp
+  #pragma once
+
+  class Device;
+  class CommandQueue;
+
+  class Mesh
+  {
+  public:
+      void Init(vector<Vertex>& vec, ComPtr<ID3D12Device> device, ComPtr<ID3D12GraphicsCommandList> cmdList);
+      void Render();
+
+  private:
+      ComPtr<ID3D12Resource>    _vertexBuffer;
+      D3D12_VERTEX_BUFFER_VIEW  _vertexBufferView = {};
+      uint32                    _vertexCount = 0;
+
+      ComPtr<ID3D12GraphicsCommandList> _cmdList;
+  };
+
+  ```
+
+- Mesh.cpp
+
+  ```cpp
+  #include "pch.h"
+  #include "Mesh.h"
+
+  #include "Device.h"
+  #include "CommandQueue.h"
+
+  void Mesh::Init(vector<Vertex>& vec, ComPtr<ID3D12Device> device, ComPtr<ID3D12GraphicsCommandList> cmdList)
+  {
+      _cmdList = cmdList;
+
+      _vertexCount = static_cast<uint32>(vec.size());   // for. Render
+      uint32 bufferSize = _vertexCount * sizeof(Vertex);
+
+      D3D12_HEAP_PROPERTIES heapProperty = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
+      D3D12_RESOURCE_DESC desc = CD3DX12_RESOURCE_DESC::Buffer(bufferSize);
+
+      device->CreateCommittedResource(
+          &heapProperty,
+          D3D12_HEAP_FLAG_NONE,
+          &desc,
+          D3D12_RESOURCE_STATE_GENERIC_READ,
+          nullptr,
+          IID_PPV_ARGS(&_vertexBuffer)
+      );
+
+      // 삼각형 정보를 Vertex Buffer(in. GPU)로 복사
+      void* vertexDataBuffer = nullptr;
+      CD3DX12_RANGE readRange(0, 0);
+      _vertexBuffer->Map(0, &readRange, &vertexDataBuffer);
+      ::memcpy(vertexDataBuffer, &vec[0], bufferSize);
+      _vertexBuffer->Unmap(0, nullptr);
+
+      // Vertex Buffer View 초기화
+      _vertexBufferView.BufferLocation = _vertexBuffer->GetGPUVirtualAddress();
+      _vertexBufferView.StrideInBytes = sizeof(Vertex); // 정점 1개 크기
+      _vertexBufferView.SizeInBytes = bufferSize;       // 버퍼의 크기
+  }
+
+  void Mesh::Render()
+  {
+      _cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+      _cmdList->IASetVertexBuffers(0, 1, &_vertexBufferView);   // Slot: (0~15)
+      _cmdList->DrawInstanced(_vertexCount, 1, 0, 0);
+  }
+
+  ```
+
+### Shader
+
+- 단계별로 일감을 기술
+
+  - Vertex Shader 단계
+    > 정점 정보 설정
+  - Pixel Shader 단계
+    > 색상을 설정
+
+- Shader.h
+
+  ```cpp
+  #pragma once
+
+  class Device;
+  class RootSignature;
+
+  class Shader
+  {
+  public:
+      void Init(const wstring& path, ComPtr<ID3D12Device> device, ComPtr<ID3D12GraphicsCommandList> cmdList, ComPtr<ID3D12RootSignature> signature);
+      void Update();
+
+  private:
+      void CreateShader(const wstring& path, const string& name, const string& version, ComPtr<ID3DBlob>& blob, D3D12_SHADER_BYTECODE& shaderByteCode);
+      void CreateVertexShader(const wstring& path, const string& name, const string& version);
+      void CreatePixelShader(const wstring& path, const string& name, const string& version);
+
+  private:
+      ComPtr<ID3DBlob>  _vsBlob;
+      ComPtr<ID3DBlob>  _psBlob;
+      ComPtr<ID3DBlob>  _errBlob;
+
+      ComPtr<ID3D12PipelineState>         _pipelineState;
+      D3D12_GRAPHICS_PIPELINE_STATE_DESC  _pipelineDesc = {};
+
+      ComPtr<ID3D12GraphicsCommandList>   _cmdList;
+  };
+
+  ```
+
+- Shader.cpp
+
+  ```cpp
+  #include "pch.h"
+  #include "Shader.h"
+
+  void Shader::Init(const wstring& path, ComPtr<ID3D12Device> device, ComPtr<ID3D12GraphicsCommandList> cmdList, ComPtr<ID3D12RootSignature> signature)
+  {
+      _cmdList = cmdList;
+
+      CreateVertexShader(path, "VS_Main", "vs_5_0");    // Vertex Shader
+      CreatePixelShader(path, "PS_Main", "ps_5_0");     // Pixel Shader
+
+      D3D12_INPUT_ELEMENT_DESC desc[] =
+      {
+          {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+          {"COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+      };
+
+      _pipelineDesc.InputLayout = { desc, _countof(desc) };
+      _pipelineDesc.pRootSignature = signature.Get();
+
+      _pipelineDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+      _pipelineDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+      _pipelineDesc.DepthStencilState.DepthEnable = FALSE;
+      _pipelineDesc.DepthStencilState.StencilEnable = FALSE;
+      _pipelineDesc.SampleMask = UINT_MAX;
+      _pipelineDesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+      _pipelineDesc.NumRenderTargets = 1;
+      _pipelineDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
+      _pipelineDesc.SampleDesc.Count = 1;
+
+      device->CreateGraphicsPipelineState(&_pipelineDesc, IID_PPV_ARGS(&_pipelineState));
+  }
+
+  void Shader::Update()
+  {
+      _cmdList->SetPipelineState(_pipelineState.Get());
+  }
+
+  void Shader::CreateShader(const wstring& path, const string& name, const string& version, ComPtr<ID3DBlob>& blob, D3D12_SHADER_BYTECODE& shaderByteCode)
+  {
+      uint32 compileFlag = 0;
+  #ifdef _DEBUG
+      compileFlag = D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION;
+  #endif
+
+      if (FAILED(::D3DCompileFromFile(path.c_str(), nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE, name.c_str(), version.c_str(), compileFlag, 0, &blob, &_errBlob)))
+      {
+          ::MessageBoxA(nullptr, "Shader Create Failed!", nullptr, MB_OK);
+      }
+
+      shaderByteCode = { blob->GetBufferPointer(), blob->GetBufferSize() };
+  }
+
+  void Shader::CreateVertexShader(const wstring& path, const string& name, const string& version)
+  {
+      CreateShader(path, name, version, _vsBlob, _pipelineDesc.VS);
+  }
+
+  void Shader::CreatePixelShader(const wstring& path, const string& name, const string& version)
+  {
+      CreateShader(path, name, version, _psBlob, _pipelineDesc.PS);
+  }
+
+  ```
+
+- default.hlsli
+
+  ```hlsli
+  struct VS_IN
+  {
+      float3 pos : POSITION;
+      float4 color : COLOR;
+  };
+
+  struct VS_OUT
+  {
+      float4 pos : SV_Position;
+      float4 color : COLOR;
+  };
+
+  // Vertex Shader에 사용될 함수
+  VS_OUT VS_Main(VS_IN input)
+  {
+      VS_OUT output = (VS_OUT)0;
+
+      output.pos = float4(input.pos, 1.f);
+      output.color = input.color;
+
+      return output;
+  }
+
+  // Pixel Shader에 사용될 함수
+  float4 PS_Main(VS_OUT input) : SV_Target
+  {
+      return input.color;
+  }
+  ```
+
+### Mesh와 Shader로 삼각형 띄우기
+
+- Engine.h
+
+  ```cpp
+  #pragma once
+
+  class Device;
+  class CommandQueue;
+  class SwapChain;
+  class RootSignature;
+
+  class Engine
+  {
+      ...
+
+  public:
+      shared_ptr<Device> GetDevice() const { return _device; }
+      shared_ptr<CommandQueue> GetCmdQueue() const { return _cmdQueue; }
+      shared_ptr<SwapChain> GetSwapChain() const { return _swapChain; }
+      shared_ptr<RootSignature> GetRootSignature() const {return _rootSignature;}
+
+      ...
+  }
+  ```
+
+- Game.cpp
+
+  ```cpp
+  #include "pch.h"
+  #include "Game.h"
+
+  #include "Engine.h"
+  #include "Device.h"
+  #include "CommandQueue.h"
+  #include "RootSignature.h"
+
+  #include "Mesh.h"
+  #include "Shader.h"
+
+  shared_ptr<Mesh> mesh = make_shared<Mesh>();
+  shared_ptr<Shader> shader = make_shared<Shader>();
+
+  void Game::Init(const WindowInfo& window)
+  {
+      GEngine->Init(window);
+
+      vector<Vertex> vec(3);
+      vec[0].pos = Vec3(0.f, 0.5f, 0.5f);
+      vec[0].color = Vec4(1.f, 0.f, 0.f, 1.f);  // Red
+      vec[1].pos = Vec3(0.5f, -0.5f, 0.5f);
+      vec[1].color = Vec4(0.f, 1.f, 0.f, 1.f);  // Green
+      vec[2].pos = Vec3(-0.5f, -0.5f, 0.5f);
+      vec[2].color = Vec4(0.f, 0.f, 1.f, 1.f);  // Blue
+      mesh->Init(
+          vec,
+          GEngine->GetDevice()->GetDevice(),
+          GEngine->GetCmdQueue()->GetCmdList()
+      );
+
+      shader->Init(
+          L"..\\Resources\\Shader\\default.hlsli",
+          GEngine->GetDevice()->GetDevice(),
+          GEngine->GetCmdQueue()->GetCmdList(),
+          GEngine->GetRootSignature()->GetSignature()
+      );
+
+      GEngine->GetCmdQueue()->WaitSync();
+  }
+
+  void Game::Update()
+  {
+      GEngine->RenderBegin();
+
+      shader->Update();
+      mesh->Render();
+
+      //GEngine->Render();
+
+      GEngine->RenderEnd();
+  }
+
+  ```
+
+- 결과
+
+  |                  삼각형 띄우기 결과                   |
+  | :---------------------------------------------------: |
+  | ![make-triangle-result](res/make-triangle-result.png) |
 
 ---
 
