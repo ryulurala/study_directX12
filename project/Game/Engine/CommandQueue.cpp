@@ -6,6 +6,7 @@
 #include "RootSignature.h"
 #include "Engine.h"
 #include "ConstantBuffer.h"
+#include "TableDescriptorHeap.h"
 
 CommandQueue::~CommandQueue()
 {
@@ -77,6 +78,10 @@ void CommandQueue::RenderBegin(const D3D12_VIEWPORT* vp, const D3D12_RECT* rect)
 
 	_cmdList->SetGraphicsRootSignature(ROOT_SIGNATURE.Get());	// 서명
 	GEngine->GetConstantBuffer()->Clear();
+	GEngine->GetTableDescHeap()->Clear();
+
+	ID3D12DescriptorHeap* descHeap = GEngine->GetTableDescHeap()->GetDescriptorHeap().Get();
+	_cmdList->SetDescriptorHeaps(1, &descHeap);		// 사용할 Descriptor Heap 지정: 무거움
 
 	// 명령 목록에 "변경 예약"을 삽입
 	_cmdList->ResourceBarrier(1, &barrier);

@@ -5,6 +5,7 @@
 #include "Device.h"
 #include "CommandQueue.h"
 #include "ConstantBuffer.h"
+#include "TableDescriptorHeap.h"
 
 void Mesh::Init(vector<Vertex>& vec)
 {
@@ -41,9 +42,22 @@ void Mesh::Render()
 	CMD_LIST->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 	CMD_LIST->IASetVertexBuffers(0, 1, &_vertexBufferView);	// Slot: (0~15)
 
-	// 밀어넣기
-	GEngine->GetConstantBuffer()->PushData(0, &_transform, sizeof(_transform));
-	GEngine->GetConstantBuffer()->PushData(1, &_transform, sizeof(_transform));
+	{
+		// 1) Buffer에 Data 설정
+		D3D12_CPU_DESCRIPTOR_HANDLE handle = GEngine->GetConstantBuffer()->PushData(0, &_transform, sizeof(_transform));
+		
+		// 2) Table Descriptor Heap에 CBV 전달
+		GEngine->GetTableDescHeap()->SetCBV(handle, CBV_REGISTER::b0);
+	}
+
+	{
+		D3D12_CPU_DESCRIPTOR_HANDLE handle = GEngine->GetConstantBuffer()->PushData(0, &_transform, sizeof(_transform));
+		GEngine->GetTableDescHeap()->SetCBV(handle, CBV_REGISTER::b1);
+	}
+
+	// 3) Table Descriptor Heap 커밋
+	// GPU Registers가 사용할 수 있도록 올리는 작업
+	GEngine->GetTableDescHeap()->CommitTable();
 
 	CMD_LIST->DrawInstanced(_vertexCount, 1, 0, 0);
 }

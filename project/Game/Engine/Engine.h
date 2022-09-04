@@ -5,6 +5,7 @@ class CommandQueue;
 class SwapChain;
 class RootSignature;
 class ConstantBuffer;
+class TableDescriptorHeap;
 
 class Engine
 {
@@ -20,6 +21,7 @@ public:
 	shared_ptr<SwapChain> GetSwapChain() const { return _swapChain; }
 	shared_ptr<RootSignature> GetRootSignature() const {return _rootSignature;}
 	shared_ptr<ConstantBuffer> GetConstantBuffer() const {return _constantBuffer;}
+	shared_ptr<TableDescriptorHeap> GetTableDescHeap() const { return _tableDescHeap; }
 
 public:
 	void RenderBegin();		// Command Queue에 요청 사항 넣기
@@ -36,5 +38,6 @@ private:
 	shared_ptr<SwapChain> _swapChain;
 	shared_ptr<RootSignature> _rootSignature;
 	shared_ptr<ConstantBuffer> _constantBuffer;
+	shared_ptr<TableDescriptorHeap> _tableDescHeap;
 };
 
