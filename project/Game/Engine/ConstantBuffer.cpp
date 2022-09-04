@@ -14,9 +14,7 @@ ConstantBuffer::~ConstantBuffer()
 {
 	if (_cbvBuffer)
 	{
-		if (_cbvBuffer != nullptr)
-			_cbvBuffer->Unmap(0, nullptr);
-
+		_cbvBuffer->Unmap(0, nullptr);
 		_cbvBuffer = nullptr;
 	}
 }
