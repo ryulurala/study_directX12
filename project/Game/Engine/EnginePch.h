@@ -56,9 +56,11 @@ struct WindowInfo
 	bool	windowed;	// 창 or 전체화면
 };
 
-class Engine;	// 전방 선언
+#define DEVICE			GEngine->GetDevice()->GetDevice()
+#define CMD_LIST		GEngine->GetCmdQueue()->GetCmdList()
+#define ROOT_SIGNATURE	GEngine->GetRootSignature()->GetSignature()
 
-extern unique_ptr<Engine> GEngine;	// 외부 전역 변수 선언
+extern unique_ptr<class Engine> GEngine;	// 외부 전역 변수 선언
 
 struct Vertex
 {

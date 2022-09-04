@@ -23,18 +23,9 @@ void Game::Init(const WindowInfo& window)
 	vec[1].color = Vec4(0.f, 1.f, 0.f, 1.f);	// Green
 	vec[2].pos = Vec3(-0.5f, -0.5f, 0.5f);
 	vec[2].color = Vec4(0.f, 0.f, 1.f, 1.f);	// Blue
-	mesh->Init(
-		vec, 
-		GEngine->GetDevice()->GetDevice(), 
-		GEngine->GetCmdQueue()->GetCmdList()
-	);
+	mesh->Init(vec);
 
-	shader->Init(
-		L"..\\Resources\\Shader\\default.hlsli", 
-		GEngine->GetDevice()->GetDevice(), 
-		GEngine->GetCmdQueue()->GetCmdList(),
-		GEngine->GetRootSignature()->GetSignature()
-	);
+	shader->Init(L"..\\Resources\\Shader\\default.hlsli");
 
 	GEngine->GetCmdQueue()->WaitSync();
 }

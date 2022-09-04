@@ -6,7 +6,7 @@ class RootSignature;
 class Shader
 {
 public:
-	void Init(const wstring& path, ComPtr<ID3D12Device> device, ComPtr<ID3D12GraphicsCommandList> cmdList, ComPtr<ID3D12RootSignature> signature);
+	void Init(const wstring& path);
 	void Update();
 
 private:
@@ -21,7 +21,5 @@ private:
 	
 	ComPtr<ID3D12PipelineState>			_pipelineState;
 	D3D12_GRAPHICS_PIPELINE_STATE_DESC	_pipelineDesc = {};
-
-	ComPtr<ID3D12GraphicsCommandList>	_cmdList;
 };
 

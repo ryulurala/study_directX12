@@ -1,10 +1,13 @@
 #include "pch.h"
 #include "Shader.h"
 
-void Shader::Init(const wstring& path, ComPtr<ID3D12Device> device, ComPtr<ID3D12GraphicsCommandList> cmdList, ComPtr<ID3D12RootSignature> signature)
-{
-	_cmdList = cmdList;
+#include "Engine.h"
+#include "RootSignature.h"
+#include "Device.h"
+#include "CommandQueue.h"
 
+void Shader::Init(const wstring& path)
+{
 	CreateVertexShader(path, "VS_Main", "vs_5_0");	// Vertex Shader
 	CreatePixelShader(path, "PS_Main", "ps_5_0");	// Pixel Shader
 
@@ -15,7 +18,7 @@ void Shader::Init(const wstring& path, ComPtr<ID3D12Device> device, ComPtr<ID3D1
 	};
 
 	_pipelineDesc.InputLayout = { desc, _countof(desc) };
-	_pipelineDesc.pRootSignature = signature.Get();
+	_pipelineDesc.pRootSignature = ROOT_SIGNATURE.Get();
 	
 	_pipelineDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
 	_pipelineDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
@@ -27,12 +30,12 @@ void Shader::Init(const wstring& path, ComPtr<ID3D12Device> device, ComPtr<ID3D1
 	_pipelineDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
 	_pipelineDesc.SampleDesc.Count = 1;
 
-	device->CreateGraphicsPipelineState(&_pipelineDesc, IID_PPV_ARGS(&_pipelineState));
+	DEVICE->CreateGraphicsPipelineState(&_pipelineDesc, IID_PPV_ARGS(&_pipelineState));
 }
 
 void Shader::Update()
 {
-	_cmdList->SetPipelineState(_pipelineState.Get());
+	CMD_LIST->SetPipelineState(_pipelineState.Get());
 }
 
 void Shader::CreateShader(const wstring& path, const string& name, const string& version, ComPtr<ID3DBlob>& blob, D3D12_SHADER_BYTECODE& shaderByteCode)
