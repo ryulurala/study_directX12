@@ -4,6 +4,7 @@ class Device;
 class CommandQueue;
 class SwapChain;
 class RootSignature;
+class ConstantBuffer;
 
 class Engine
 {
@@ -18,6 +19,7 @@ public:
 	shared_ptr<CommandQueue> GetCmdQueue() const { return _cmdQueue; }
 	shared_ptr<SwapChain> GetSwapChain() const { return _swapChain; }
 	shared_ptr<RootSignature> GetRootSignature() const {return _rootSignature;}
+	shared_ptr<ConstantBuffer> GetConstantBuffer() const {return _constantBuffer;}
 
 public:
 	void RenderBegin();		// Command Queue에 요청 사항 넣기
@@ -33,5 +35,6 @@ private:
 	shared_ptr<CommandQueue> _cmdQueue;
 	shared_ptr<SwapChain> _swapChain;
 	shared_ptr<RootSignature> _rootSignature;
+	shared_ptr<ConstantBuffer> _constantBuffer;
 };
 

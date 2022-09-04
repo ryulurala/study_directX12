@@ -2,9 +2,7 @@
 #include "Game.h"
 
 #include "Engine.h"
-#include "Device.h"
 #include "CommandQueue.h"
-#include "RootSignature.h"
 
 #include "Mesh.h"
 #include "Shader.h"
@@ -35,7 +33,22 @@ void Game::Update()
 	GEngine->RenderBegin();
 
 	shader->Update();
-	mesh->Render();
+
+	{
+		Transform t;
+		t.offset = Vec4(0.75f, 0.f, 0.f, 0.f);
+		mesh->SetTransform(t);
+
+		mesh->Render();
+	}
+
+	{
+		Transform t;
+		t.offset = Vec4(0.f, 0.75f, 0.f, 0.f);
+		mesh->SetTransform(t);
+
+		mesh->Render();
+	}
 
 	//GEngine->Render();
 	

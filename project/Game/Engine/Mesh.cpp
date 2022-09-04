@@ -4,6 +4,7 @@
 #include "Engine.h"
 #include "Device.h"
 #include "CommandQueue.h"
+#include "ConstantBuffer.h"
 
 void Mesh::Init(vector<Vertex>& vec)
 {
@@ -39,5 +40,10 @@ void Mesh::Render()
 {
 	CMD_LIST->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 	CMD_LIST->IASetVertexBuffers(0, 1, &_vertexBufferView);	// Slot: (0~15)
+
+	// 밀어넣기
+	GEngine->GetConstantBuffer()->PushData(0, &_transform, sizeof(_transform));
+	GEngine->GetConstantBuffer()->PushData(1, &_transform, sizeof(_transform));
+
 	CMD_LIST->DrawInstanced(_vertexCount, 1, 0, 0);
 }

@@ -2,6 +2,10 @@
 #include "CommandQueue.h"
 
 #include "SwapChain.h"
+#include "Engine.h"
+#include "RootSignature.h"
+#include "Engine.h"
+#include "ConstantBuffer.h"
 
 CommandQueue::~CommandQueue()
 {
@@ -70,6 +74,9 @@ void CommandQueue::RenderBegin(const D3D12_VIEWPORT* vp, const D3D12_RECT* rect)
 		D3D12_RESOURCE_STATE_PRESENT,			// before. 화면 출력
 		D3D12_RESOURCE_STATE_RENDER_TARGET		// after. 외주 결과물
 	);
+
+	_cmdList->SetGraphicsRootSignature(ROOT_SIGNATURE.Get());	// 서명
+	GEngine->GetConstantBuffer()->Clear();
 
 	// 명령 목록에 "변경 예약"을 삽입
 	_cmdList->ResourceBarrier(1, &barrier);
