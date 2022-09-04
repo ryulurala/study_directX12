@@ -1749,7 +1749,7 @@ Table of Contents
   }
   ```
 
-### Mesh와 Shader로 삼각형 띄우기
+### Test: 삼각형 띄우기
 
 - Game.cpp
 
@@ -1809,6 +1809,347 @@ Table of Contents
 ---
 
 ## Constant Buffer
+
+- `b*` Register 사용
+
+|                             Buffer 주소 1개로 사용할 경우                             |
+| :-----------------------------------------------------------------------------------: |
+|          ![one-address-constant-buffer](res/one-address-constant-buffer.png)          |
+| Command Queue에 넣고, GPU가 나중에 처리하는 방식에서 Data가 덮어씌워질 수도 있는 상황 |
+
+|                    Buffer 주소 여러 개로 사용할 경우                    |
+| :---------------------------------------------------------------------: |
+| ![multi-address-constant-buffer](res/multi-address-constant-buffer.png) |
+|  각 Register가 다른 주소로 사용하므로 Data를 혼용해서 사용하지 않는다.  |
+
+- ConstantBuffer.h
+
+  ```cpp
+  #pragma once
+
+  class ConstantBuffer
+  {
+  public:
+      ConstantBuffer();
+      ~ConstantBuffer();
+
+      void Init(uint32 size, uint32 count);
+
+      void Clear();
+      void PushData(int32 rootParamIndex, void* buffer, uint32 size);
+
+      D3D12_GPU_VIRTUAL_ADDRESS GetGpuVirtualAddress(uint32 index);
+
+  private:
+      void CreateBuffer();
+
+  private:
+      ComPtr<ID3D12Resource> _cbvBuffer;
+      BYTE* _mappedBuffer = nullptr;
+      uint32 _elementSize = 0;  // Buffer 크기
+      uint32 _elementCount = 0; // Buffer 갯수
+
+      uint32 _currentIndex = 0;
+  };
+  ```
+
+- ConstantBuffer.cpp
+
+  ```cpp
+  #include "pch.h"
+  #include "ConstantBuffer.h"
+
+  #include "Engine.h"
+  #include "Device.h"
+  #include "CommandQueue.h"
+
+  ConstantBuffer::ConstantBuffer()
+  {
+
+  }
+
+  ConstantBuffer::~ConstantBuffer()
+  {
+      if (_cbvBuffer)
+      {
+          if (_cbvBuffer != nullptr)
+              _cbvBuffer->Unmap(0, nullptr);
+
+          _cbvBuffer = nullptr;
+      }
+  }
+
+  void ConstantBuffer::Init(uint32 size, uint32 count)
+  {
+      // 상수 버퍼는 256 byte 배수로 만들어야 함.
+      // 0 256 512 768
+      // 1 -> 256, 257 -> 512
+      _elementSize = (size + 255) & ~255;
+      _elementCount = count;
+
+      CreateBuffer();
+  }
+
+  void ConstantBuffer::Clear()
+  {
+      _currentIndex = 0;
+  }
+
+  void ConstantBuffer::PushData(int32 rootParamIndex, void* buffer, uint32 size)
+  {
+      assert(_currentIndex < _elementSize);
+
+      // Buffer에 데이터 복제
+      ::memcpy(&_mappedBuffer[_currentIndex * _elementSize], buffer, size);
+
+      // Buffer의 주소를 Register에 전송
+      D3D12_GPU_VIRTUAL_ADDRESS address = GetGpuVirtualAddress(_currentIndex);
+      CMD_LIST->SetGraphicsRootConstantBufferView(rootParamIndex, address);
+      _currentIndex++;
+  }
+
+  D3D12_GPU_VIRTUAL_ADDRESS ConstantBuffer::GetGpuVirtualAddress(uint32 index)
+  {
+      D3D12_GPU_VIRTUAL_ADDRESS objCBAddress = _cbvBuffer->GetGPUVirtualAddress();
+      objCBAddress += index * _elementSize;
+
+      return objCBAddress;
+  }
+
+  void ConstantBuffer::CreateBuffer()
+  {
+      uint32 bufferSize = _elementSize * _elementCount;
+      D3D12_HEAP_PROPERTIES heapProperty = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
+      D3D12_RESOURCE_DESC desc = CD3DX12_RESOURCE_DESC::Buffer(bufferSize);
+
+      DEVICE->CreateCommittedResource(
+          &heapProperty,
+          D3D12_HEAP_FLAG_NONE,
+          &desc,
+          D3D12_RESOURCE_STATE_GENERIC_READ,
+          nullptr,
+          IID_PPV_ARGS(&_cbvBuffer)
+      );
+
+      // Resource가 끝날 때까지 Un-map을 할 필요가 없다.
+      // 대신, GPU에서 사용하는 Resource는 쓰지 않아야 한다.
+      // for. 동기화 필요 like WaitSync()
+      _cbvBuffer->Map(0, nullptr, reinterpret_cast<void**>(&_mappedBuffer));
+  }
+
+  ```
+
+- Engine.h
+
+  > Constant Buffer 생성
+
+  ```cpp
+  ...
+  class ConstantBuffer;
+
+  class Engine
+  {
+  public:
+      ...
+      shared_ptr<ConstantBuffer> GetConstantBuffer() const {return _constantBuffer;}
+
+  ...
+
+  private:
+      ...
+      shared_ptr<ConstantBuffer> _constantBuffer;
+  }
+
+  ```
+
+- Engine.cpp
+
+  > Constant Buffer 생성
+
+  ```cpp
+  ...
+
+  #include "ConstantBuffer.h"
+
+  void Engine::Init(const WindowInfo& window)
+  {
+      ...
+
+      _constantBuffer = make_shared<ConstantBuffer>();
+
+      ...
+
+      _constantBuffer->Init(sizeof(Transform), 256);
+  }
+
+  ...
+  ```
+
+- EnginePch.h
+
+  > Transform 구조체 추가
+
+  ```cpp
+  ...
+
+  struct Transform
+  {
+      Vec4 offset;
+  }
+  ```
+
+### Command Queue에서 서명
+
+- CommandQueue.cpp
+
+  ```cpp
+  ...
+
+  #include "Engine.h"
+  #include "ConstantBuffer.h"
+
+  ...
+
+  void CommandQueue::RenderBegin(const D3D12_VIEWPORT* vp, const D3D12_RECT* rect)
+  {
+      ...
+
+      // Back Buffer Resource를 "화면 출력용"에서 "외주 결과물"로 변경 예약
+      D3D12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+          _swapChain->GetBackRTVBuffer().Get(), // Back Buffer Resource
+          D3D12_RESOURCE_STATE_PRESENT,         // before. 화면 출력
+          D3D12_RESOURCE_STATE_RENDER_TARGET    // after. 외주 결과물
+      );
+
+      _cmdList->SetGraphicsRootSignature(ROOT_SIGNATURE.Get()); // 서명
+      GEngine->GetConstantBuffer()->Clear();
+
+      // 명령 목록에 "변경 예약"을 삽입
+      _cmdList->ResourceBarrier(1, &barrier);
+
+      ...
+  }
+
+  ...
+  ```
+
+### Constant Buffer에 밀어넣기
+
+- Mesh.cpp
+
+  ```cpp
+  ...
+
+  #include "ConstantBuffer.h"
+
+  ...
+
+  void Mesh::Render()
+  {
+      CMD_LIST->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+      CMD_LIST->IASetVertexBuffers(0, 1, &_vertexBufferView);   // Slot: (0~15)
+
+      // 밀어넣기
+      GEngine->GetConstantBuffer()->PushData(0, &_transform, sizeof(_transform));
+      GEngine->GetConstantBuffer()->PushData(1, &_transform, sizeof(_transform));
+
+      CMD_LIST->DrawInstanced(_vertexCount, 1, 0, 0);
+  }
+
+  ```
+
+### Test: 위치, 색 다른 삼각형 두 개 띄우기
+
+- RootSignature.cpp
+
+  > root CBV 생성
+
+  ```cpp
+  ...
+
+  void RootSignature::Init(ComPtr<ID3D12Device> device)
+  {
+      // D3D12_SHADER_VISIBILITY: 특정 단계를 지정하면 다음 단계에서는 안 보이는 상태(소실)
+      // D3D12_SHADER_VISIBILITY_ALL: 모든 단계에서 사용 가능
+      CD3DX12_ROOT_PARAMETER param[2];
+      param[0].InitAsConstantBufferView(0); // 0 - root CBV - b0
+      param[1].InitAsConstantBufferView(1); // 1 - root CBV - b1
+
+      ...
+  }
+  ```
+
+- default.hlsli
+
+  > b0, b1 Register 사용
+
+  ```hlsli
+  cbuffer TEST_B0 : register(b0)
+  {
+      float offset0;
+  };
+
+  cbuffer TEST_B1 : register(b1)
+  {
+      float offset1;
+  };
+
+  ...
+
+  VS_OUT VS_Main(VS_IN input)
+  {
+    VS_OUT output = (VS_OUT)0;
+
+    output.pos = float4(input.pos, 1.f);
+    output.pos += offset0;
+    output.color = input.color;
+    output.color += offset1;
+
+    return output;
+  }
+
+  ...
+  ```
+
+- Game.cpp
+
+  ```cpp
+  ...
+
+  void Game::Update()
+  {
+      GEngine->RenderBegin();
+
+      shader->Update();
+
+      {
+          Transform t;
+          t.offset = Vec4(0.75f, 0.f, 0.f, 0.f);
+          mesh->SetTransform(t);
+
+          mesh->Render();
+      }
+
+      {
+          Transform t;
+          t.offset = Vec4(0.f, 0.75f, 0.f, 0.f);
+          mesh->SetTransform(t);
+
+          mesh->Render();
+      }
+
+      //GEngine->Render();
+
+      GEngine->RenderEnd();
+  }
+
+  ```
+
+- 결과
+
+  |                색, 위치 다른 삼각형 두 개                 |
+  | :-------------------------------------------------------: |
+  | ![constant-buffer-result](res/constant-buffer-result.png) |
 
 ---
 
