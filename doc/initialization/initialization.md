@@ -2166,20 +2166,29 @@ Table of Contents
 
 ## Root Signature
 
-|                     Descriptable table 이용                     |
-| :-------------------------------------------------------------: |
-|    ![one-descriptable-table](res/one-descriptable-table.png)    |
-| Heap이 하나로 데이터를 덮어서 사용할 수 있는 타이밍 이슈가 발생 |
+- Root Signature는 64 DWORD(= 256 byte)로 가능하다.
 
-|       Heap을 여러 개로 만들어서 Descriptable table 사용       |
-| :-----------------------------------------------------------: |
-| ![multi-descriptable-table](res/multi-descriptable-table.png) |
+  > 많은 수의 Root Signature를 사용하려면 Table을 이용한다.
 
-- SetDescriptorHeaps 호출은 매우 느리다.
+  |                       Table X                       |                        Table O                        |
+  | :-------------------------------------------------: | :---------------------------------------------------: |
+  | ![no-descriptor-table](res/no-descriptor-table.png) | ![use-descriptor-table](res/use-descriptor-table.png) |
 
-  > 매번 배열을 생성하고 하는 것은 매우 느리다.
-  >
-  > 그래서, 하나의 매우 큰 배열로 생성하고 이를 나눠서 사용하도록 한다.
+|                    Descriptable table 사용 과정                     |
+| :-----------------------------------------------------------------: |
+| ![multi-descriptable-table](res/use-descriptable-table-process.png) |
+|   Heap을 여러 개로 만들어 데이터를 덮어 씌우는 상황이 없도록 구성   |
+
+- SetDescriptorHeaps, SetGraphicsRootDescriptorTable
+
+  ```cpp
+  // CMD List가 인지할 수 있는 Descriptor heap을 set
+  // 무거운 호출이다. 따라서, 하나의 매우 큰 배열로 생성해 이를 나눠서 사용하도록 한다.
+  CMDLIST->SetDescriptorHeaps()
+
+  // 몇 번 째 주소인지 연결
+  CMDLIST->SetGraphicsRootDescriptorTable()
+  ```
 
 - EnginePch.h
 
