@@ -1418,7 +1418,7 @@ Table of Contents
   void RootSignature::Init(ComPtr<ID3D12Device> device)
   {
       D3D12_ROOT_SIGNATURE_DESC sigDesc = CD3DX12_ROOT_SIGNATURE_DESC(D3D12_DEFAULT);
-      sigDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;   // 임력 조립기 단계
+      sigDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;   // 입력 조립기 단계
 
       ComPtr<ID3DBlob> blobSignature;
       ComPtr<ID3DBlob> blobError;
@@ -1465,6 +1465,59 @@ Table of Contents
   }
   ```
 
+### 전역 매크로 추가
+
+- 자주 사용하는 경우에 매크로 변수로 추가한다.
+
+  > ex. Device, Command List, Root Signature
+
+- CommandQueue.h
+
+  > Get Command List 추가
+
+  ```cpp
+
+  public:
+      ComPtr< ID3D12GraphicsCommandList> GetCmdList() const{ return _cmdList; }
+
+  ```
+
+- Engine.h
+
+  ```cpp
+  #pragma once
+
+  class Device;
+  class CommandQueue;
+  class SwapChain;
+  class RootSignature;
+
+  class Engine
+  {
+      ...
+
+  public:
+      shared_ptr<Device> GetDevice() const { return _device; }
+      shared_ptr<CommandQueue> GetCmdQueue() const { return _cmdQueue; }
+      shared_ptr<SwapChain> GetSwapChain() const { return _swapChain; }
+      shared_ptr<RootSignature> GetRootSignature() const {return _rootSignature;}
+
+      ...
+  }
+  ```
+
+- EnginePch.h
+
+```cpp
+...
+
+#define DEVICE          GEngine->GetDevice()->GetDevice()
+#define CMD_LIST        GEngine->GetCmdQueue()->GetCmdList()
+#define ROOT_SIGNATURE  GEngine->GetRootSignature()->GetSignature()
+
+...
+```
+
 ### Mesh
 
 - 정점으로 이루어진 물체
@@ -1483,17 +1536,6 @@ Table of Contents
   };
   ```
 
-- CommandQueue.h
-
-  > Get Command List 추가
-
-  ```cpp
-
-  public:
-      ComPtr< ID3D12GraphicsCommandList> GetCmdList() const{ return _cmdList; }
-
-  ```
-
 - Mesh.h
 
   ```cpp
@@ -1505,15 +1547,13 @@ Table of Contents
   class Mesh
   {
   public:
-      void Init(vector<Vertex>& vec, ComPtr<ID3D12Device> device, ComPtr<ID3D12GraphicsCommandList> cmdList);
+      void Init(vector<Vertex>& vec);
       void Render();
 
   private:
       ComPtr<ID3D12Resource>    _vertexBuffer;
       D3D12_VERTEX_BUFFER_VIEW  _vertexBufferView = {};
-      uint32                    _vertexCount = 0;
-
-      ComPtr<ID3D12GraphicsCommandList> _cmdList;
+      uint32 _vertexCount = 0;
   };
 
   ```
@@ -1524,20 +1564,19 @@ Table of Contents
   #include "pch.h"
   #include "Mesh.h"
 
+  #include "Engine.h"
   #include "Device.h"
   #include "CommandQueue.h"
 
-  void Mesh::Init(vector<Vertex>& vec, ComPtr<ID3D12Device> device, ComPtr<ID3D12GraphicsCommandList> cmdList)
+  void Mesh::Init(vector<Vertex>& vec)
   {
-      _cmdList = cmdList;
-
       _vertexCount = static_cast<uint32>(vec.size());   // for. Render
       uint32 bufferSize = _vertexCount * sizeof(Vertex);
 
       D3D12_HEAP_PROPERTIES heapProperty = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
       D3D12_RESOURCE_DESC desc = CD3DX12_RESOURCE_DESC::Buffer(bufferSize);
 
-      device->CreateCommittedResource(
+      DEVICE->CreateCommittedResource(
           &heapProperty,
           D3D12_HEAP_FLAG_NONE,
           &desc,
@@ -1555,15 +1594,15 @@ Table of Contents
 
       // Vertex Buffer View 초기화
       _vertexBufferView.BufferLocation = _vertexBuffer->GetGPUVirtualAddress();
-      _vertexBufferView.StrideInBytes = sizeof(Vertex); // 정점 1개 크기
-      _vertexBufferView.SizeInBytes = bufferSize;       // 버퍼의 크기
+      _vertexBufferView.StrideInBytes = sizeof(Vertex);   // 정점 1개 크기
+      _vertexBufferView.SizeInBytes = bufferSize;         // 버퍼의 크기
   }
 
   void Mesh::Render()
   {
-      _cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-      _cmdList->IASetVertexBuffers(0, 1, &_vertexBufferView);   // Slot: (0~15)
-      _cmdList->DrawInstanced(_vertexCount, 1, 0, 0);
+      CMD_LIST->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+      CMD_LIST->IASetVertexBuffers(0, 1, &_vertexBufferView);   // Slot: (0~15)
+      CMD_LIST->DrawInstanced(_vertexCount, 1, 0, 0);
   }
 
   ```
@@ -1588,7 +1627,7 @@ Table of Contents
   class Shader
   {
   public:
-      void Init(const wstring& path, ComPtr<ID3D12Device> device, ComPtr<ID3D12GraphicsCommandList> cmdList, ComPtr<ID3D12RootSignature> signature);
+      void Init(const wstring& path);
       void Update();
 
   private:
@@ -1603,8 +1642,6 @@ Table of Contents
 
       ComPtr<ID3D12PipelineState>         _pipelineState;
       D3D12_GRAPHICS_PIPELINE_STATE_DESC  _pipelineDesc = {};
-
-      ComPtr<ID3D12GraphicsCommandList>   _cmdList;
   };
 
   ```
@@ -1615,12 +1652,15 @@ Table of Contents
   #include "pch.h"
   #include "Shader.h"
 
-  void Shader::Init(const wstring& path, ComPtr<ID3D12Device> device, ComPtr<ID3D12GraphicsCommandList> cmdList, ComPtr<ID3D12RootSignature> signature)
-  {
-      _cmdList = cmdList;
+  #include "Engine.h"
+  #include "RootSignature.h"
+  #include "Device.h"
+  #include "CommandQueue.h"
 
-      CreateVertexShader(path, "VS_Main", "vs_5_0");    // Vertex Shader
-      CreatePixelShader(path, "PS_Main", "ps_5_0");     // Pixel Shader
+  void Shader::Init(const wstring& path)
+  {
+      CreateVertexShader(path, "VS_Main", "vs_5_0");  // Vertex Shader
+      CreatePixelShader(path, "PS_Main", "ps_5_0");   // Pixel Shader
 
       D3D12_INPUT_ELEMENT_DESC desc[] =
       {
@@ -1629,7 +1669,7 @@ Table of Contents
       };
 
       _pipelineDesc.InputLayout = { desc, _countof(desc) };
-      _pipelineDesc.pRootSignature = signature.Get();
+      _pipelineDesc.pRootSignature = ROOT_SIGNATURE.Get();
 
       _pipelineDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
       _pipelineDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
@@ -1641,12 +1681,12 @@ Table of Contents
       _pipelineDesc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
       _pipelineDesc.SampleDesc.Count = 1;
 
-      device->CreateGraphicsPipelineState(&_pipelineDesc, IID_PPV_ARGS(&_pipelineState));
+      DEVICE->CreateGraphicsPipelineState(&_pipelineDesc, IID_PPV_ARGS(&_pipelineState));
   }
 
   void Shader::Update()
   {
-      _cmdList->SetPipelineState(_pipelineState.Get());
+      CMD_LIST->SetPipelineState(_pipelineState.Get());
   }
 
   void Shader::CreateShader(const wstring& path, const string& name, const string& version, ComPtr<ID3DBlob>& blob, D3D12_SHADER_BYTECODE& shaderByteCode)
@@ -1711,30 +1751,6 @@ Table of Contents
 
 ### Mesh와 Shader로 삼각형 띄우기
 
-- Engine.h
-
-  ```cpp
-  #pragma once
-
-  class Device;
-  class CommandQueue;
-  class SwapChain;
-  class RootSignature;
-
-  class Engine
-  {
-      ...
-
-  public:
-      shared_ptr<Device> GetDevice() const { return _device; }
-      shared_ptr<CommandQueue> GetCmdQueue() const { return _cmdQueue; }
-      shared_ptr<SwapChain> GetSwapChain() const { return _swapChain; }
-      shared_ptr<RootSignature> GetRootSignature() const {return _rootSignature;}
-
-      ...
-  }
-  ```
-
 - Game.cpp
 
   ```cpp
@@ -1763,18 +1779,9 @@ Table of Contents
       vec[1].color = Vec4(0.f, 1.f, 0.f, 1.f);  // Green
       vec[2].pos = Vec3(-0.5f, -0.5f, 0.5f);
       vec[2].color = Vec4(0.f, 0.f, 1.f, 1.f);  // Blue
-      mesh->Init(
-          vec,
-          GEngine->GetDevice()->GetDevice(),
-          GEngine->GetCmdQueue()->GetCmdList()
-      );
+      mesh->Init(vec);
 
-      shader->Init(
-          L"..\\Resources\\Shader\\default.hlsli",
-          GEngine->GetDevice()->GetDevice(),
-          GEngine->GetCmdQueue()->GetCmdList(),
-          GEngine->GetRootSignature()->GetSignature()
-      );
+      shader->Init(L"..\\Resources\\Shader\\default.hlsli");
 
       GEngine->GetCmdQueue()->WaitSync();
   }
