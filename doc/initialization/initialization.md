@@ -1998,9 +1998,9 @@ Table of Contents
   }
   ```
 
-### Command Queue에서 서명
-
 - CommandQueue.cpp
+
+  > Render 전에 서명을 넘김
 
   ```cpp
   ...
@@ -2033,44 +2033,32 @@ Table of Contents
   ...
   ```
 
-### Constant Buffer에 밀어넣기
-
-- Mesh.cpp
-
-  ```cpp
-  ...
-
-  #include "ConstantBuffer.h"
-
-  ...
-
-  void Mesh::Render()
-  {
-      CMD_LIST->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-      CMD_LIST->IASetVertexBuffers(0, 1, &_vertexBufferView);   // Slot: (0~15)
-
-      // 밀어넣기
-      GEngine->GetConstantBuffer()->PushData(0, &_transform, sizeof(_transform));
-      GEngine->GetConstantBuffer()->PushData(1, &_transform, sizeof(_transform));
-
-      CMD_LIST->DrawInstanced(_vertexCount, 1, 0, 0);
-  }
-
-  ```
-
 ### Test: 위치, 색 다른 삼각형 두 개 띄우기
 
 - RootSignature.cpp
 
-  > root CBV 생성
+  > root CBV 생성.
+  >
+  > GPU의 Register를 사용한다는 일종의 서명.
+
+  |       Constant Buffer View 설정       |
+  | :-----------------------------------: |
+  | ![one-constant](res/one-constant.png) |
 
   ```cpp
   ...
 
   void RootSignature::Init(ComPtr<ID3D12Device> device)
   {
-      // D3D12_SHADER_VISIBILITY: 특정 단계를 지정하면 다음 단계에서는 안 보이는 상태(소실)
-      // D3D12_SHADER_VISIBILITY_ALL: 모든 단계에서 사용 가능
+      // InitAsConstantBufferView(UINT shaderRegister, UINT registerSpace = 0U, D3D12_SHADER_VISIBILITY visibility = D3D12_SHADER_VISIBILITY_ALL)
+      // Parameters:
+      //    shaderRegister:
+      //      레지스터 번호
+      //    registerSpace:
+      //      만약 레지스터 번호가 같을 경우, 그것을 구분시켜줌
+      //    visibility
+      //      특정 Shader 단계만 사용하기 위해 소멸 시점을 정할 수 있다.
+
       CD3DX12_ROOT_PARAMETER param[2];
       param[0].InitAsConstantBufferView(0); // 0 - root CBV - b0
       param[1].InitAsConstantBufferView(1); // 1 - root CBV - b1
@@ -2109,6 +2097,31 @@ Table of Contents
   }
 
   ...
+  ```
+
+- Mesh.cpp
+
+  > Constant Buffer에 밀어넣기
+
+  ```cpp
+  ...
+
+  #include "ConstantBuffer.h"
+
+  ...
+
+  void Mesh::Render()
+  {
+      CMD_LIST->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+      CMD_LIST->IASetVertexBuffers(0, 1, &_vertexBufferView);   // Slot: (0~15)
+
+      // 밀어넣기
+      GEngine->GetConstantBuffer()->PushData(0, &_transform, sizeof(_transform));
+      GEngine->GetConstantBuffer()->PushData(1, &_transform, sizeof(_transform));
+
+      CMD_LIST->DrawInstanced(_vertexCount, 1, 0, 0);
+  }
+
   ```
 
 - Game.cpp
