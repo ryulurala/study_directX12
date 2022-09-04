@@ -2166,6 +2166,404 @@ Table of Contents
 
 ## Root Signature
 
+|                     Descriptable table 이용                     |
+| :-------------------------------------------------------------: |
+|    ![one-descriptable-table](res/one-descriptable-table.png)    |
+| Heap이 하나로 데이터를 덮어서 사용할 수 있는 타이밍 이슈가 발생 |
+
+|       Heap을 여러 개로 만들어서 Descriptable table 사용       |
+| :-----------------------------------------------------------: |
+| ![multi-descriptable-table](res/multi-descriptable-table.png) |
+
+- SetDescriptorHeaps 호출은 매우 느리다.
+
+  > 매번 배열을 생성하고 하는 것은 매우 느리다.
+  >
+  > 그래서, 하나의 매우 큰 배열로 생성하고 이를 나눠서 사용하도록 한다.
+
+- EnginePch.h
+
+  > Constant Buffer View가 사용하는 Register 정의
+
+  ```cpp
+  enum class CBV_REGISTER
+  {
+      b0,
+      b1,
+      b2,
+      b3,
+      b4,
+
+      END
+  };
+
+  enum
+  {
+      SWAP_CHAIN_BUFFER_COUNT = 2,
+      CBV_REGISTER_COUNT = CBV_REGISTER::END,
+  };
+  ```
+
+- RootSignature.cpp
+
+  > Descriptor Heap을 사용하겠다고 서명
+
+  ```cpp
+  ...
+
+  void RootSignature::Init(ComPtr<ID3D12Device> device)
+  {
+      CD3DX12_DESCRIPTOR_RANGE ranges[] =
+      {
+          CD3DX12_DESCRIPTOR_RANGE(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, CBV_REGISTER_COUNT, 0)  // b0 ~ b4
+      };
+
+      CD3DX12_ROOT_PARAMETER param[1];
+      param[0].InitAsDescriptorTable(_countof(ranges), ranges);
+
+      D3D12_ROOT_SIGNATURE_DESC sigDesc = CD3DX12_ROOT_SIGNATURE_DESC(_countof(param), param);
+      ...
+  }
+  ```
+
+- ConstantBuffer.h
+
+  ```cpp
+  ...
+
+  class ConstantBuffer
+  {
+  public:
+      ...
+      D3D12_CPU_DESCRIPTOR_HANDLE PushData(int32 rootParamIndex, void* buffer, uint32 size);
+
+      D3D12_CPU_DESCRIPTOR_HANDLE GetCpuHandle(UINT32 index);
+
+  private:
+      void CreateBuffer();
+      void CreateView();
+
+  private:
+      ...
+
+      ComPtr<ID3D12DescriptorHeap> _cbvHeap;
+      D3D12_CPU_DESCRIPTOR_HANDLE _cpuHandleBegin = {};
+      uint32 _handleIncrementSize = 0;
+
+      uint32 _currentIndex = 0;
+  };
+
+  ```
+
+- ConstantBuffer.cpp
+
+  ```cpp
+  ...
+
+  void ConstantBuffer::Init(uint32 size, uint32 count)
+  {
+      // 상수 버퍼는 256 byte 배수로 만들어야 함.
+      // 0 256 512 768
+      // 1 -> 256, 257 -> 512
+      _elementSize = (size + 255) & ~255;
+      _elementCount = count;
+
+      CreateBuffer();
+      CreateView();
+  }
+
+  D3D12_CPU_DESCRIPTOR_HANDLE ConstantBuffer::PushData(int32 rootParamIndex, void* buffer, uint32 size)
+  {
+      assert(_currentIndex < _elementSize);
+
+      // Buffer에 데이터 복제
+      ::memcpy(&_mappedBuffer[_currentIndex * _elementSize], buffer, size);
+
+      D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle = GetCpuHandle(_currentIndex);
+      _currentIndex++;
+
+      return cpuHandle;
+  }
+
+  ...
+
+  D3D12_CPU_DESCRIPTOR_HANDLE ConstantBuffer::GetCpuHandle(UINT32 index)
+  {
+      //D3D12_CPU_DESCRIPTOR_HANDLE handle = _cpuHandleBegin;
+      //handle.ptr += index * _handleIncrementSize;
+      //return handle;
+
+      // 위와 동일
+      return CD3DX12_CPU_DESCRIPTOR_HANDLE(_cpuHandleBegin, index * _handleIncrementSize);
+  }
+
+  ...
+
+  void ConstantBuffer::CreateView()
+  {
+      // Descriptor Heap 생성
+      D3D12_DESCRIPTOR_HEAP_DESC cbvDesc = {};
+      cbvDesc.NumDescriptors = _elementCount;
+      cbvDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+      cbvDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+
+      DEVICE->CreateDescriptorHeap(&cbvDesc, IID_PPV_ARGS(&_cbvHeap));
+
+      _cpuHandleBegin = _cbvHeap->GetCPUDescriptorHandleForHeapStart();
+      _handleIncrementSize = DEVICE->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);  // GPU 사양마다 다름
+
+      // Constant Buffer View 생성
+      for (uint32 i = 0; i < _elementCount; i++)
+      {
+          D3D12_CPU_DESCRIPTOR_HANDLE cbvHandle = GetCpuHandle(i);
+
+          D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc = {};
+          cbvDesc.BufferLocation = _cbvBuffer->GetGPUVirtualAddress() + static_cast<uint64>(_elementSize) * i;
+          cbvDesc.SizeInBytes = _elementSize;
+
+          DEVICE->CreateConstantBufferView(&cbvDesc, cbvHandle);
+      }
+  }
+
+  ```
+
+### Table Descriptor Heap
+
+- EnginePch.h
+
+  > 총 Register 갯수 선언
+
+  ```cpp
+  ...
+
+  enum
+  {
+      SWAP_CHAIN_BUFFER_COUNT = 2,
+      CBV_REGISTER_COUNT = CBV_REGISTER::END,
+      REGISTER_COUNT = CBV_REGISTER::END,   // 현재는 Only. Constant Buffer View만 사용
+  };
+
+  ...
+  ```
+
+- TableDescriptorHeap.h
+
+  > CopyDescriptors, SetGraphicsRootDescriptorTable 담당
+
+  ```cpp
+  #pragma once
+
+  class TableDescriptorHeap
+  {
+  public:
+      void Init(uint32 count);
+      void Clear();
+
+      void SetCBV(D3D12_CPU_DESCRIPTOR_HANDLE srcHandle, CBV_REGISTER reg);
+      void CommitTable();
+
+      ComPtr<ID3D12DescriptorHeap> GetDescriptorHeap() const { return _descHeap; }
+
+      D3D12_CPU_DESCRIPTOR_HANDLE GetCpuHandle(CBV_REGISTER reg) const;
+
+  private:
+      D3D12_CPU_DESCRIPTOR_HANDLE GetCpuHandle(uint32 reg) const;
+
+  private:
+      ComPtr<ID3D12DescriptorHeap> _descHeap;
+      uint64 _handleSize = 0;   // = handleIncrementSize
+      uint64 _groupSize = 0;
+      uint64 _groupCount = 0;
+
+      uint32 _currentGroupIndex = 0;
+
+  };
+
+  ```
+
+- TableDescriptorHeap.cpp
+
+  ```cpp
+  #include "pch.h"
+  #include "TableDescriptorHeap.h"
+
+  #include "Engine.h"
+  #include "Device.h"
+  #include "CommandQueue.h"
+
+  void TableDescriptorHeap::Init(uint32 count)
+  {
+      _groupCount = count;
+
+      D3D12_DESCRIPTOR_HEAP_DESC desc = {};
+      desc.NumDescriptors = count * REGISTER_COUNT;
+      desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE; // for. GPU 메모리 상주
+      desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;     // CBV 용도
+
+      DEVICE->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&_descHeap));
+
+      _handleSize = DEVICE->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+      _groupSize = _handleSize * REGISTER_COUNT;
+  }
+
+  void TableDescriptorHeap::Clear()
+  {
+      _currentGroupIndex = 0;
+  }
+
+  void TableDescriptorHeap::SetCBV(D3D12_CPU_DESCRIPTOR_HANDLE srcHandle, CBV_REGISTER reg)
+  {
+      D3D12_CPU_DESCRIPTOR_HANDLE destHandle = GetCpuHandle(reg);
+
+      uint32 destRange = 1;
+      uint32 srcRange = 1;
+
+      // Desc.Heap(CBV) -> Desc.Heap(Shader Visible)
+      DEVICE->CopyDescriptors(1, &destHandle, &destRange, 1, &srcHandle, &srcRange, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+  }
+
+  void TableDescriptorHeap::CommitTable()
+  {
+      D3D12_GPU_DESCRIPTOR_HANDLE handle = _descHeap->GetGPUDescriptorHandleForHeapStart();
+      handle.ptr += _currentGroupIndex * _groupSize;
+
+      // GPU Registers가 사용할 Table로 올림
+      CMD_LIST->SetGraphicsRootDescriptorTable(0, handle);
+
+      _currentGroupIndex++;
+  }
+
+  D3D12_CPU_DESCRIPTOR_HANDLE TableDescriptorHeap::GetCpuHandle(CBV_REGISTER reg) const
+  {
+      return GetCpuHandle(static_cast<uint32>(reg));
+  }
+
+  D3D12_CPU_DESCRIPTOR_HANDLE TableDescriptorHeap::GetCpuHandle(uint32 reg) const
+  {
+      D3D12_CPU_DESCRIPTOR_HANDLE handle = _descHeap->GetCPUDescriptorHandleForHeapStart();
+      handle.ptr += _currentGroupIndex * _groupSize;
+      handle.ptr += reg * _handleSize;
+
+      return handle;
+  }
+
+  ```
+
+- Engine.h
+
+  > Table Descriptor Heap 추가
+
+  ```cpp
+  ...
+
+  class TableDescriptorHeap;
+
+  class Engine
+  {
+  ...
+
+  public:
+      ...
+      shared_ptr<TableDescriptorHeap> GetTableDescHeap() const { return _tableDescHeap; }
+
+  ...
+
+  private:
+      ...
+      shared_ptr<TableDescriptorHeap> _tableDescHeap;
+  }
+
+  ```
+
+- Engine.cpp
+
+  ```cpp
+  ...
+
+  #include "TableDescriptorHeap.h"
+
+  void Engine::Init(const WindowInfo& window)
+  {
+      ...
+      _tableDescHeap = make_shared<TableDescriptorHeap>();
+
+      ...
+      _tableDescHeap->Init(256);
+  }
+
+  ...
+  ```
+
+- CommandQueue.cpp
+
+  > 프레임당 한 번 SetDescriptorHeaps() 호출
+
+  ```cpp
+  ...
+
+  #include "TableDescriptorHeap.h"
+
+  ...
+
+  void CommandQueue::RenderBegin(const D3D12_VIEWPORT* vp, const D3D12_RECT* rect)
+  {
+      ...
+
+      _cmdList->SetGraphicsRootSignature(ROOT_SIGNATURE.Get()); // 서명
+      GEngine->GetConstantBuffer()->Clear();
+      GEngine->GetTableDescHeap()->Clear();
+
+      ID3D12DescriptorHeap* descHeap = GEngine->GetTableDescHeap()->GetDescriptorHeap().Get();
+      _cmdList->SetDescriptorHeaps(1, &descHeap);   // 사용할 Descriptor Heap 지정: 무거움
+
+      // 명령 목록에 "변경 예약"을 삽입
+      _cmdList->ResourceBarrier(1, &barrier);
+  }
+
+  ...
+  ```
+
+- Mesh.cpp
+
+  > 1. Buffer에 Data 설정
+  >
+  > 2. Table Descriptor Heap에 CBV 전달
+  >
+  > 3. Table Descriptor Heap 커밋
+
+  ```cpp
+  ...
+
+  #include "TableDescriptorHeap.h"
+
+  ...
+
+  void Mesh::Render()
+  {
+      CMD_LIST->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+      CMD_LIST->IASetVertexBuffers(0, 1, &_vertexBufferView); // Slot: (0~15)
+
+      {
+          // 1) Buffer에 Data 설정
+          D3D12_CPU_DESCRIPTOR_HANDLE handle = GEngine->GetConstantBuffer()->PushData(0, &_transform, sizeof(_transform));
+
+          // 2) Table Descriptor Heap에 CBV 전달
+          GEngine->GetTableDescHeap()->SetCBV(handle, CBV_REGISTER::b0);
+      }
+
+      {
+          D3D12_CPU_DESCRIPTOR_HANDLE handle = GEngine->GetConstantBuffer()->PushData(0, &_transform, sizeof(_transform));
+          GEngine->GetTableDescHeap()->SetCBV(handle, CBV_REGISTER::b1);
+      }
+
+      // 3) Table Descriptor Heap 커밋
+      // GPU Registers가 사용할 수 있도록 올리는 작업
+      GEngine->GetTableDescHeap()->CommitTable();
+
+      CMD_LIST->DrawInstanced(_vertexCount, 1, 0, 0);
+  }
+  ```
+
 ---
 
 ## Index Buffer
