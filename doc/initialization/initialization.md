@@ -2577,6 +2577,272 @@ Table of Contents
 
 ## Index Buffer
 
+- Mesh 초기화는 단 한 번만 하고, 공통 Mesh로 사용한다.
+
+- Vertex Buffer
+  > 삼각형을 만들기 위한 Vertex 목록
+- Index Buffer
+  > 삼각형을 만들기 위한 Vertex 목록 안에서 3개의 Indices를 사용해 삼각형을 만든다.
+  >
+  > Vertex가 중첩될 때 Index만을 이용하기 때문에 메모리를 절약함
+
+|                        "Only. Vertex Buffer" vs "With. Index Buffer"                        |
+| :-----------------------------------------------------------------------------------------: |
+| ![only-vertex-buffer-vs-with-index-buffer](res/only-vertex-buffer-vs-with-index-buffer.png) |
+
+### 사각형 띄우기(Only. Vertex Buffer)
+
+- Game.cpp
+
+  > Vertex 3 -> 6
+  >
+  > transform 1개만 적용
+
+  ```cpp
+  ...
+
+  void Game::Init(const WindowInfo& window)
+  {
+      GEngine->Init(window);
+
+      vector<Vertex> vec(6);
+      vec[0].pos = Vec3(-0.5f, 0.5f, 0.5f);
+      vec[0].color = Vec4(1.f, 0.f, 0.f, 1.f);  // Red
+      vec[1].pos = Vec3(0.5f, 0.5f, 0.5f);
+      vec[1].color = Vec4(0.f, 1.f, 0.f, 1.f);  // Green
+      vec[2].pos = Vec3(0.5f, -0.5f, 0.5f);
+      vec[2].color = Vec4(0.f, 0.f, 1.f, 1.f);  // Blue
+
+      vec[3].pos = Vec3(0.5f, -0.5f, 0.5f);   // = vec[2]
+      vec[3].color = Vec4(0.f, 0.f, 1.f, 1.f);
+      vec[4].pos = Vec3(-0.5f, -0.5f, 0.5f);
+      vec[4].color = Vec4(0.f, 1.f, 0.f, 1.f);
+      vec[5].pos = Vec3(-0.5f, 0.5f, 0.5f);   // = vec[0]
+      vec[5].color = Vec4(1.f, 0.f, 0.f, 1.f);
+
+      mesh->Init(vec);
+
+      ...
+  }
+
+  void Game::Update()
+  {
+      GEngine->RenderBegin();
+
+      shader->Update();
+
+      // Transform 1개만 사용
+      Transform t;
+      t.offset = Vec4(0.f, 0.f, 0.f, 0.f);
+      mesh->SetTransform(t);
+      mesh->Render();
+
+      //GEngine->Render();
+
+      GEngine->RenderEnd();
+  }
+  ```
+
+- Mesh.cpp
+
+  > Mesh 1개 띄우기로 변경
+
+  ```cpp
+  ...
+
+  void Mesh::Render()
+  {
+      CMD_LIST->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+      CMD_LIST->IASetVertexBuffers(0, 1, &_vertexBufferView); // Slot: (0~15)
+
+      // 1) Buffer에 Data 설정
+      D3D12_CPU_DESCRIPTOR_HANDLE handle = GEngine->GetConstantBuffer()->PushData(0, &_transform, sizeof(_transform));
+
+      // 2) Table Descriptor Heap에 CBV 전달
+      GEngine->GetTableDescHeap()->SetCBV(handle, CBV_REGISTER::b0);
+
+      // 3) Table Descriptor Heap 커밋
+      // GPU Registers가 사용할 수 있도록 올리는 작업
+      GEngine->GetTableDescHeap()->CommitTable();
+
+      CMD_LIST->DrawInstanced(_vertexCount, 1, 0, 0);   // Vertex 이용
+  }
+  ```
+
+- 결과
+
+  |                Only. Vertex Buffer                |
+  | :-----------------------------------------------: |
+  | ![only-vertex-buffer](res/only-vertex-buffer.png) |
+
+### 사각형 띄우기(with. Index Buffer)
+
+- Mesh.h
+
+  ```cpp
+  ...
+
+  class Mesh
+  {
+  public:
+      void Init(const vector<Vertex>& vertexBuffer, const vector<uint32>& indexBuffer);
+      ...
+
+  private:
+      void CreateVertexBuffer(const vector<Vertex>& buffer);
+      void CreateIndexBuffer(const vector<uint32>& buffer);
+
+  private:
+      ...
+
+      ComPtr<ID3D12Resource>    _indexBuffer;
+      D3D12_INDEX_BUFFER_VIEW   _indexBufferView;
+      uint32 _indexCount = 0;
+
+      Transform _transform = {};
+  };
+
+  ```
+
+- Mesh.cpp
+
+  > Index Buffer 생성
+  >
+  > Command List에 Index Buffer View 사용함을 알려주기
+
+  ```cpp
+  ...
+
+  void Mesh::Init(const vector<Vertex>& vertexBuffer, const vector<uint32>& indexBuffer)
+  {
+      CreateVertexBuffer(vertexBuffer);
+      CreateIndexBuffer(indexBuffer);
+  }
+
+  void Mesh::Render()
+  {
+      CMD_LIST->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+      CMD_LIST->IASetVertexBuffers(0, 1, &_vertexBufferView); // Slot: (0~15)
+      CMD_LIST->IASetIndexBuffer(&_indexBufferView);  // Index Buffer 사용
+
+      ...
+
+      //CMD_LIST->DrawInstanced(_vertexCount, 1, 0, 0);   // Vertex 이용
+      CMD_LIST->DrawIndexedInstanced(_indexCount, 1, 0, 0, 0);
+  }
+
+  void Mesh::CreateVertexBuffer(const vector<Vertex>& buffer)
+  {
+      _vertexCount = static_cast<uint32>(buffer.size());    // for. Render
+      uint32 bufferSize = _vertexCount * sizeof(Vertex);
+
+      D3D12_HEAP_PROPERTIES heapProperty = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
+      D3D12_RESOURCE_DESC desc = CD3DX12_RESOURCE_DESC::Buffer(bufferSize);
+
+      DEVICE->CreateCommittedResource(
+          &heapProperty,
+          D3D12_HEAP_FLAG_NONE,
+          &desc,
+          D3D12_RESOURCE_STATE_GENERIC_READ,
+          nullptr,
+          IID_PPV_ARGS(&_vertexBuffer)
+      );
+
+      // 삼각형 정보를 Vertex Buffer(in. GPU)로 복사
+      void* vertexDataBuffer = nullptr;
+      CD3DX12_RANGE readRange(0, 0);
+      _vertexBuffer->Map(0, &readRange, &vertexDataBuffer);
+      ::memcpy(vertexDataBuffer, &buffer[0], bufferSize);
+      _vertexBuffer->Unmap(0, nullptr);
+
+      // Vertex Buffer View 초기화
+      _vertexBufferView.BufferLocation = _vertexBuffer->GetGPUVirtualAddress();
+      _vertexBufferView.StrideInBytes = sizeof(Vertex); // 정점 1개 크기
+      _vertexBufferView.SizeInBytes = bufferSize;       // 버퍼의 크기
+  }
+
+  void Mesh::CreateIndexBuffer(const vector<uint32>& buffer)
+  {
+      _indexCount = static_cast<uint32>(buffer.size());
+      uint32 bufferSize = _indexCount * sizeof(uint32);
+
+      D3D12_HEAP_PROPERTIES heapProperty = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
+      D3D12_RESOURCE_DESC desc = CD3DX12_RESOURCE_DESC::Buffer(bufferSize);
+
+      DEVICE->CreateCommittedResource(
+          &heapProperty,
+          D3D12_HEAP_FLAG_NONE,
+          &desc,
+          D3D12_RESOURCE_STATE_GENERIC_READ,
+          nullptr,
+          IID_PPV_ARGS(&_indexBuffer)
+      );
+
+      void* IndexDataBuffer = nullptr;
+      CD3DX12_RANGE readRange(0, 0);
+      _indexBuffer->Map(0, &readRange, &IndexDataBuffer);
+      ::memcpy(IndexDataBuffer, &buffer[0], bufferSize);
+      _indexBuffer->Unmap(0, nullptr);
+
+      _indexBufferView.BufferLocation = _indexBuffer->GetGPUVirtualAddress();
+      _indexBufferView.Format = DXGI_FORMAT_R32_UINT;   // 32 bits
+      _indexBufferView.SizeInBytes = bufferSize;
+  }
+
+  ```
+
+- Game.cpp
+
+  > Index Vector 정의
+
+  ```cpp
+
+  ...
+
+  void Game::Init(const WindowInfo& window)
+  {
+      GEngine->Init(window);
+
+      // Vertex buffer
+      vector<Vertex> vertexVec(4);
+      vertexVec[0].pos = Vec3(-0.5f, 0.5f, 0.5f);
+      vertexVec[0].color = Vec4(1.f, 0.f, 0.f, 1.f);
+      vertexVec[1].pos = Vec3(0.5f, 0.5f, 0.5f);
+      vertexVec[1].color = Vec4(0.f, 1.f, 0.f, 1.f);
+      vertexVec[2].pos = Vec3(0.5f, -0.5f, 0.5f);
+      vertexVec[2].color = Vec4(0.f, 0.f, 1.f, 1.f);
+      vertexVec[3].pos = Vec3(-0.5f, -0.5f, 0.5f);
+      vertexVec[3].color = Vec4(0.f, 1.f, 0.f, 1.f);
+
+      // Index buffer
+      vector<uint32> indexVec;
+      // 0, 1, 2로 이루어진 삼각형
+      indexVec.push_back(0);
+      indexVec.push_back(1);
+      indexVec.push_back(2);
+
+      // 0, 2, 3으로 이루어진 삼각형
+      indexVec.push_back(0);
+      indexVec.push_back(2);
+      indexVec.push_back(3);
+
+      mesh->Init(vertexVec, indexVec);
+
+      shader->Init(L"..\\Resources\\Shader\\default.hlsli");
+
+      GEngine->GetCmdQueue()->WaitSync();
+  }
+
+  ...
+
+  ```
+
+- 결과
+
+  |         Vertex Buffer with Index Buffer         |
+  | :---------------------------------------------: |
+  | ![with-index-buffer](res/with-index-buffer.png) |
+
 ---
 
 ## Texture Mapping
