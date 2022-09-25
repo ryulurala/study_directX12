@@ -6,6 +6,7 @@
 #include "CommandQueue.h"
 #include "ConstantBuffer.h"
 #include "TableDescriptorHeap.h"
+#include "Texture.h"
 
 void Mesh::Init(const vector<Vertex>& vertexBuffer, const vector<uint32>& indexBuffer)
 {
@@ -24,6 +25,9 @@ void Mesh::Render()
 		
 	// 2) Table Descriptor Heap에 CBV 전달
 	GEngine->GetTableDescHeap()->SetCBV(handle, CBV_REGISTER::b0);
+
+	// Table Descriptor Heap에 SRV 전달
+	GEngine->GetTableDescHeap()->SetSRV(_tex->GetCpuHandle(), SRV_REGISTER::t0);
 
 	// 3) Table Descriptor Heap 커밋
 	// GPU Registers가 사용할 수 있도록 올리는 작업

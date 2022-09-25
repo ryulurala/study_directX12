@@ -1,5 +1,7 @@
 ﻿#pragma once
 
+#define _HAS_STD_BYTE 0		// std::byte 사용 X
+
 #include <windows.h>
 #include <tchar.h>
 #include <memory>
@@ -9,6 +11,9 @@
 #include <list>
 #include <map>
 using namespace std;
+
+#include <filesystem>
+namespace fs = std::filesystem;
 
 // DirectX 관련
 #include "d3dx12.h"		// Microsoft의 비공식 라이브러리
@@ -23,11 +28,20 @@ using namespace DirectX;
 using namespace DirectX::PackedVector;
 using namespace Microsoft::WRL;
 
+#include <DirectXTex.h>
+#include <DirectXTex.inl>
+
 // Library
 #pragma comment(lib, "d3d12")
 #pragma comment(lib, "dxgi")
 #pragma comment(lib, "dxguid")
 #pragma comment(lib, "d3dcompiler")
+
+#ifdef _DEBUG
+#pragma comment(lib, "DirectXTex_debug.lib")
+#else
+#pragma comment(lib, "DirectXTex_release.lib")
+#endif
 
 // typedef
 using int8		= __int8;
@@ -43,7 +57,7 @@ using Vec3		= XMFLOAT3;
 using Vec4		= XMFLOAT4;
 using Matrix	= XMMATRIX;
 
-enum class CBV_REGISTER
+enum class CBV_REGISTER : uint8
 {
 	b0,
 	b1,
@@ -54,11 +68,23 @@ enum class CBV_REGISTER
 	END
 };
 
+enum class SRV_REGISTER : uint8
+{
+	t0 = static_cast<uint8>(CBV_REGISTER::END),		// CBV's END와 번호 같음
+	t1,
+	t2,
+	t3,
+	t4,
+
+	END
+};
+
 enum
 {
 	SWAP_CHAIN_BUFFER_COUNT = 2,
 	CBV_REGISTER_COUNT = CBV_REGISTER::END,
-	REGISTER_COUNT = CBV_REGISTER::END,
+	SRV_REGISTER_COUNT = static_cast<uint8>(SRV_REGISTER::END) - CBV_REGISTER_COUNT,
+	REGISTER_COUNT = CBV_REGISTER_COUNT + SRV_REGISTER_COUNT,
 };
 
 struct WindowInfo
@@ -69,9 +95,10 @@ struct WindowInfo
 	bool	windowed;	// 창 or 전체화면
 };
 
-#define DEVICE			GEngine->GetDevice()->GetDevice()
-#define CMD_LIST		GEngine->GetCmdQueue()->GetCmdList()
-#define ROOT_SIGNATURE	GEngine->GetRootSignature()->GetSignature()
+#define DEVICE				GEngine->GetDevice()->GetDevice()
+#define CMD_LIST			GEngine->GetCmdQueue()->GetCmdList()
+#define RESOURCE_CMD_LIST	GEngine->GetCmdQueue()->GetResourceCmdList()
+#define ROOT_SIGNATURE		GEngine->GetRootSignature()->GetSignature()
 
 extern unique_ptr<class Engine> GEngine;	// 외부 전역 변수 선언
 
@@ -79,6 +106,7 @@ struct Vertex
 {
 	Vec3 pos;	// x, y, z
 	Vec4 color;	// R, G, B, A
+	Vec2 uv;
 };
 
 struct Transform
