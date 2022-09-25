@@ -2847,6 +2847,681 @@ Table of Contents
 
 ## Texture Mapping
 
+- Texture Mapping
+  > Mesh의 Vertex와 (U, V) 좌표를 맵핑
+  >
+  > Texture: 2D Image.
+
+### DirectXTex
+
+- DirectXTex
+
+  > Texture 리소소를 편리하게 관리하고 사용할 수 있는 기능.
+  >
+  > DirectX SDK와 Windows SDK를 통합하면서 유틸리티와 툴 기능을 별도의 라이브러리로 분리했는데 그중 하나.
+
+1. [Github 링크](https://github.com/microsoft/DirectXTex)에서 프로젝트(.zip) 다운로드
+2. 각 플랫폼에 맞는 솔루션 열기
+   > DirectXTex_Desktop_2019_Win10.sln 이용
+3. Debug, Release로 각각 빌드 후, .lib 파일 추출
+   > Debug, Release를 구별하기 위해 Debug는 subfix를 달아주자!
+4. 각 파일 프로젝트에 복사: Debug, Release의 `DirectXTex.lib` 파일 2 개와 `DirectXTex.h`, `DirectXTex.inl`
+
+   |   Debug, Release의 `DirectXTex.lib` 2 개    |                `DirectXTex.h`, `DirectXTex.inl`                 |
+   | :-----------------------------------------: | :-------------------------------------------------------------: |
+   | ![directx-tex-lib](res/directx-tex-lib.png) | ![directx-tex-header-inline](res/directx-tex-header-inline.png) |
+
+5. 프로젝트 속성 수정 & #include(in EnginePch)
+
+   |         Engine Project의 포함, 라이브러리 디렉터리 탭 수정          |         Client Project의 포함, 라이브러리 디렉터리 탭 수정          |
+   | :-----------------------------------------------------------------: | :-----------------------------------------------------------------: |
+   | ![directx-tex-engine-settings](res/directx-tex-engine-settings.png) | ![directx-tex-client-settings](res/directx-tex-client-settings.png) |
+
+   - EnginePch.h
+
+     ```cpp
+
+     ...
+
+     #include <DirectXTex.h>
+     #include <DirectXTex.inl>
+
+     ...
+
+     #ifdef _DEBUG
+     #pragma comment(lib, "DirectXTex_debug.lib")
+     #else
+     #pragma comment(lib, "DirectXTex_release.lib")
+     #endif
+
+     ...
+
+     ```
+
+### C++ 버전 변경 (for. 파일 시스템 사용)
+
+|               Engine Project C++ 17 사용                |               Client Project C++ 17 사용                |
+| :-----------------------------------------------------: | :-----------------------------------------------------: |
+| ![cpp-version-up-engine](res/cpp-version-up-engine.png) | ![cpp-version-up-client](res/cpp-version-up-client.png) |
+
+- EnginePch.h
+
+  ```cpp
+  #pragma once
+
+  #define _HAS_STD_BYTE 0   // std::byte 사용 X (for. file-system byte와 충돌)
+
+  ...
+
+  #include <filesystem>
+  namespace fs = std::filesystem;
+
+  ...
+
+  ```
+
+### Resource Load 용도의 Command List 추가
+
+- CommandQueue.h
+
+  ```cpp
+
+  ...
+
+  public:
+      ...
+      void FlushResourceCommandQueue();
+      ...
+      ComPtr<ID3D12GraphicsCommandList> GetResourceCmdList() const { return _resCmdList; }
+
+  private:
+      ...
+      ComPtr<ID3D12CommandAllocator>    _resCmdAlloc;
+      ComPtr<ID3D12GraphicsCommandList> _resCmdList;
+
+  ...
+
+  ```
+
+- CommandQueue.cpp
+
+  ```cpp
+
+  ...
+
+  void CommandQueue::Init(ComPtr<ID3D12Device> device, shared_ptr<SwapChain> swapChain)
+  {
+      ...
+
+      // D3D12_COMMAND_LIST_TYPE_DIRECT: GPU가 직접 실행하는 명령 목록
+      device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&_cmdAlloc));
+      device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, _cmdAlloc.Get(), nullptr, IID_PPV_ARGS(&_cmdList));
+      _cmdList->Close();
+
+      // 리소스 로드 용도
+      device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&_resCmdAlloc));
+      device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, _resCmdAlloc.Get(), nullptr, IID_PPV_ARGS(&_resCmdList));
+
+      ...
+  }
+
+  ...
+
+  void CommandQueue::FlushResourceCommandQueue()
+  {
+      // 문 닫기
+      _resCmdList->Close();
+
+      // 명령 실행
+      ID3D12CommandList* cmdListArr[] = { _resCmdList.Get() };
+      _cmdQueue->ExecuteCommandLists(_countof(cmdListArr), cmdListArr);
+
+      WaitSync();
+
+      // 다시 사용할 준비
+      _resCmdAlloc->Reset();
+      _resCmdList->Reset(_resCmdAlloc.Get(), nullptr);
+  }
+
+  ```
+
+- EnginePch.h
+
+  > Resource Command List 얻는 매크로 추가
+
+  ```cpp
+  ...
+
+  #define CMD_LIST          GEngine->GetCmdQueue()->GetCmdList()
+  #define RESOURCE_CMD_LIST GEngine->GetCmdQueue()->GetResourceCmdList()
+
+  ...
+  ```
+
+### Texture 클래스 생성
+
+- EnginePch.h
+
+  > uv 좌표 추가
+
+  ```cpp
+  ...
+
+  struct Vertex
+  {
+      Vec3 pos;   // x, y, z
+      Vec4 color; // R, G, B, A
+      Vec2 uv;    // uv 추가
+  };
+
+  ...
+  ```
+
+- Texture.h
+
+  > Texture 관리
+
+  ```cpp
+  #pragma once
+  class Texture
+  {
+  public:
+      void Init(const wstring& path);
+
+      D3D12_CPU_DESCRIPTOR_HANDLE GetCpuHandle() const { return _srvHandle; }
+
+  public:
+      void CreateTexture(const wstring& path);
+      void CreateView();
+
+  private:
+      ScratchImage                  _image;
+      ComPtr<ID3D12Resource>        _tex2D;
+
+      ComPtr<ID3D12DescriptorHeap>  _srvHeap;   // View
+      D3D12_CPU_DESCRIPTOR_HANDLE   _srvHandle; // View 하나만 사용하기 때문에
+  };
+
+  ```
+
+- Texture.cpp
+
+  ```cpp
+  #include "pch.h"
+  #include "Texture.h"
+
+  #include "Engine.h"
+  #include "Device.h"
+  #include "CommandQueue.h"
+
+  void Texture::Init(const wstring& path)
+  {
+      CreateTexture(path);
+      CreateView();
+  }
+
+  void Texture::CreateTexture(const wstring& path)
+  {
+      // 파일 확장자 얻기
+      wstring ext = fs::path(path).extension(); // file-system: C++ 17 ~
+
+      if (ext == L".dds" || ext == L".DDS")
+          ::LoadFromDDSFile(path.c_str(), DDS_FLAGS_NONE, nullptr, _image);
+      else if (ext == L".tga" || ext == L".TGA")
+          ::LoadFromTGAFile(path.c_str(), nullptr, _image);
+      else
+          ::LoadFromWICFile(path.c_str(), WIC_FLAGS_NONE, nullptr, _image); // png, jpg, jpeg, bmp
+
+      // Texture 생성
+      HRESULT hr = ::CreateTexture(DEVICE.Get(), _image.GetMetadata(), &_tex2D);
+      if (FAILED(hr))
+          assert(nullptr);
+
+      // 업로드 준비
+      vector<D3D12_SUBRESOURCE_DATA> subResources;
+
+      hr = ::PrepareUpload(
+          DEVICE.Get(),
+          _image.GetImages(),
+          _image.GetImageCount(),
+          _image.GetMetadata(),
+          subResources);
+
+      if (FAILED(hr))
+          assert(nullptr);
+
+      // 업로드 힙 버퍼 생성
+      const uint64 bufferSize = ::GetRequiredIntermediateSize(_tex2D.Get(), 0, static_cast<uint32>(subResources.size()));
+
+      D3D12_HEAP_PROPERTIES heapProperty = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
+      D3D12_RESOURCE_DESC desc = CD3DX12_RESOURCE_DESC::Buffer(bufferSize);
+
+      ComPtr<ID3D12Resource> textureUploadHeap;
+      hr = DEVICE->CreateCommittedResource(
+          &heapProperty,
+          D3D12_HEAP_FLAG_NONE,
+          &desc,
+          D3D12_RESOURCE_STATE_GENERIC_READ,
+          nullptr,
+          IID_PPV_ARGS(textureUploadHeap.GetAddressOf()));
+
+      if (FAILED(hr))
+        assert(nullptr);
+
+      ::UpdateSubresources(
+          RESOURCE_CMD_LIST.Get(),
+          _tex2D.Get(),
+          textureUploadHeap.Get(),
+          0, 0,
+          static_cast<unsigned int>(subResources.size()),
+          subResources.data());
+
+      GEngine->GetCmdQueue()->FlushResourceCommandQueue();
+  }
+
+  void Texture::CreateView()
+  {
+      D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc = {};
+      srvHeapDesc.NumDescriptors = 1;
+      srvHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+      srvHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+      DEVICE->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&_srvHeap));
+
+      _srvHandle = _srvHeap->GetCPUDescriptorHandleForHeapStart();
+
+      D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+      srvDesc.Format = _image.GetMetadata().format;
+      srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+      srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+      srvDesc.Texture2D.MipLevels = 1;
+      DEVICE->CreateShaderResourceView(_tex2D.Get(), &srvDesc, _srvHandle);
+  }
+
+  ```
+
+### Register 사용한다는 서명 추가
+
+- RootSignature.cpp
+
+  ```cpp
+
+  ...
+
+  void RootSignature::Init(ComPtr<ID3D12Device> device)
+  {
+      CD3DX12_DESCRIPTOR_RANGE ranges[] =
+      {
+          CD3DX12_DESCRIPTOR_RANGE(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, CBV_REGISTER_COUNT, 0), // b0 ~ b4
+          CD3DX12_DESCRIPTOR_RANGE(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, SRV_REGISTER_COUNT, 0)  // t0 ~ t4
+      };
+
+      ...
+  }
+
+  ```
+
+- EnginePch.h
+
+  > SRV_REGISTER 정의
+
+  ```cpp
+
+  ...
+
+  enum class CBV_REGISTER : uint8
+  {
+      b0,
+      b1,
+      b2,
+      b3,
+      b4,
+
+      END
+  };
+
+  enum class SRV_REGISTER : uint8
+  {
+      t0 = static_cast<uint8>(CBV_REGISTER::END),   // CBV's END와 번호 같음
+      t1,
+      t2,
+      t3,
+      t4,
+
+      END
+  };
+
+  enum
+  {
+      SWAP_CHAIN_BUFFER_COUNT = 2,
+      CBV_REGISTER_COUNT = CBV_REGISTER::END,
+      SRV_REGISTER_COUNT = static_cast<uint8>(SRV_REGISTER::END) - CBV_REGISTER_COUNT,
+      REGISTER_COUNT = CBV_REGISTER_COUNT + SRV_REGISTER_COUNT,
+  };
+
+  ...
+
+  ```
+
+### Shader 코드 수정: uv 활용
+
+- Shader.cpp
+
+  > uv와 맵핑
+
+  ```cpp
+  ...
+
+  void Shader::Init(const wstring& path)
+  {
+      ...
+
+      D3D12_INPUT_ELEMENT_DESC desc[] =
+      {
+          {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+          {"COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+          {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 28, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+      };
+
+      ...
+  }
+
+  ...
+  ```
+
+- default.hlsli
+
+  > Register Mapping
+
+  ```hlsli
+  ...
+
+  Texture2D tex_0 : register(t0);   // 't0' register와 tex_0 대응
+
+  SamplerState sam_0 : register(s0);
+
+  struct VS_IN
+  {
+      float3 pos : POSITION;
+      float4 color : COLOR;
+      float2 uv : TEXCOORD;
+  };
+
+  struct VS_OUT
+  {
+      float4 pos : SV_Position;
+      float4 color : COLOR;
+      float2 uv : TEXCOORD;
+  };
+
+  // Vertex Shader에 사용될 함수
+  VS_OUT VS_Main(VS_IN input)
+  {
+      VS_OUT output = (VS_OUT)0;
+
+      output.pos = float4(input.pos, 1.f);
+      output.color = input.color;
+      output.uv = input.uv;
+
+      return output;
+  }
+
+  // Pixel Shader에 사용될 함수
+  float4 PS_Main(VS_OUT input) : SV_Target
+  {
+      float4 color = tex_0.Sample(sam_0, input.uv);   // 색상 정책
+
+      return color;
+  }
+
+  ```
+
+### Sampler 활용 준비
+
+- RootSignature.h
+
+  ```cpp
+  #pragma once
+  class RootSignature
+  {
+  public:
+      void Init();
+
+      ComPtr<ID3D12RootSignature> GetSignature() const { return _signature; }
+
+  private:
+      void CreateSamplerDesc();
+      void CreateRootSignature();
+
+  private:
+      ComPtr<ID3D12RootSignature> _signature;
+      D3D12_STATIC_SAMPLER_DESC   _samplerDesc;
+
+  };
+
+  ```
+
+- RootSignature.cpp
+
+  ```cpp
+  #include "pch.h"
+  #include "RootSignature.h"
+
+  #include "Engine.h"
+  #include "Device.h"
+
+  void RootSignature::Init()
+  {
+      CreateSamplerDesc();
+      CreateRootSignature();
+  }
+
+  void RootSignature::CreateSamplerDesc()
+  {
+      _samplerDesc = CD3DX12_STATIC_SAMPLER_DESC(0);  // default
+  }
+
+  void RootSignature::CreateRootSignature()
+  {
+      CD3DX12_DESCRIPTOR_RANGE ranges[] =
+      {
+          CD3DX12_DESCRIPTOR_RANGE(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, CBV_REGISTER_COUNT, 0), // b0 ~ b4
+          CD3DX12_DESCRIPTOR_RANGE(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, SRV_REGISTER_COUNT, 0)  // t0 ~ t4
+      };
+
+      CD3DX12_ROOT_PARAMETER param[1];
+      param[0].InitAsDescriptorTable(_countof(ranges), ranges);
+
+      D3D12_ROOT_SIGNATURE_DESC sigDesc = CD3DX12_ROOT_SIGNATURE_DESC(_countof(param), param, 1, &_samplerDesc);
+      sigDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT; // 입력 조립기 단계
+
+      ComPtr<ID3DBlob> blobSignature;
+      ComPtr<ID3DBlob> blobError;
+      ::D3D12SerializeRootSignature(&sigDesc, D3D_ROOT_SIGNATURE_VERSION_1, &blobSignature, &blobError);
+      DEVICE->CreateRootSignature(0, blobSignature->GetBufferPointer(), blobSignature->GetBufferSize(), IID_PPV_ARGS(&_signature));
+  }
+
+  ```
+
+- Engine.cpp
+
+  ```cpp
+  ...
+
+  void Engine::Init(const WindowInfo& window)
+  {
+      ...
+      _rootSignature->Init();   // device 파라미터 삭제
+
+      ...
+  }
+
+  ...
+  ```
+
+### SRV(Shader Resource View) 설정
+
+- TableDescriptorHeap.h
+
+  ```cpp
+  #pragma once
+
+  class TableDescriptorHeap
+  {
+  public:
+      ...
+      void SetSRV(D3D12_CPU_DESCRIPTOR_HANDLE srcHandle, SRV_REGISTER reg);
+
+      ...
+      D3D12_CPU_DESCRIPTOR_HANDLE GetCpuHandle(SRV_REGISTER reg) const;
+
+  private:
+      D3D12_CPU_DESCRIPTOR_HANDLE GetCpuHandle(uint8 reg) const;  // uint32 -> uint8
+
+  ...
+
+  };
+
+  ```
+
+- TableDescriptorHeap.cpp
+
+  ```cpp
+  ...
+
+  void TableDescriptorHeap::SetSRV(D3D12_CPU_DESCRIPTOR_HANDLE srcHandle, SRV_REGISTER reg)
+  {
+      D3D12_CPU_DESCRIPTOR_HANDLE destHandle = GetCpuHandle(reg);
+
+      uint32 destRange = 1;
+      uint32 srcRange = 1;
+      DEVICE->CopyDescriptors(1, &destHandle, &destRange, 1, &srcHandle, &srcRange, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+  }
+
+  ...
+
+  D3D12_CPU_DESCRIPTOR_HANDLE TableDescriptorHeap::GetCpuHandle(CBV_REGISTER reg) const
+  {
+      return GetCpuHandle(static_cast<uint8>(reg));   // uint32 -> uint8
+  }
+
+  D3D12_CPU_DESCRIPTOR_HANDLE TableDescriptorHeap::GetCpuHandle(SRV_REGISTER reg) const
+  {
+      return GetCpuHandle(static_cast<uint8>(reg));
+  }
+
+  D3D12_CPU_DESCRIPTOR_HANDLE TableDescriptorHeap::GetCpuHandle(uint8 reg) const  // uint32 -> uint8
+  {
+      D3D12_CPU_DESCRIPTOR_HANDLE handle = _descHeap->GetCPUDescriptorHandleForHeapStart();
+      handle.ptr += _currentGroupIndex * _groupSize;
+      handle.ptr += reg * _handleSize;
+
+      return handle;
+  }
+
+  ```
+
+### Mesh에 Texture 추가
+
+- Mesh.h
+
+  ```cpp
+  ...
+  class Texture;
+
+  class Mesh
+  {
+  public:
+      ...
+      void SetTexture(shared_ptr<Texture> tex) { _tex = tex; }
+
+  ...
+
+  private:
+      ...
+      shared_ptr<Texture> _tex = {};
+  };
+
+  ```
+
+- Mesh.cpp
+
+  ```cpp
+  ...
+
+  void Mesh::Render()
+  {
+      ...
+
+      // 2) Table Descriptor Heap에 CBV 전달
+      GEngine->GetTableDescHeap()->SetCBV(handle, CBV_REGISTER::b0);
+
+      // Texture Handle로 t0 Register에 밀어 넣기
+      GEngine->GetTableDescHeap()->SetSRV(_tex->GetCpuHandle(), SRV_REGISTER::t0);
+
+      ...
+  }
+
+  ...
+  ```
+
+### Vertex에 UV 할당 및 Texture 초기화
+
+- Game.cpp
+
+  ```cpp
+  ...
+  #include "Texture.h"
+
+  ...
+  shared_ptr<Texture> texture = make_shared<Texture>();
+
+  void Game::Init(const WindowInfo& window)
+  {
+      GEngine->Init(window);
+
+      // Vertex buffer
+      vector<Vertex> vertexVec(4);
+      ...
+      vertexVec[0].uv = Vec2(0.f, 0.f);   // uv
+      ...
+      vertexVec[1].uv = Vec2(1.f, 0.f);   // uv
+      ...
+      vertexVec[2].uv = Vec2(1.f, 1.f);   // uv
+      ...
+      vertexVec[3].uv = Vec2(0.f, 1.f);   // uv
+
+      ...
+
+      mesh->Init(vertexVec, indexVec);
+
+      shader->Init(L"..\\Resources\\Shader\\default.hlsli");
+
+      texture->Init(L"..\\Resources\\Texture\\cloud-sky-blue.jpg");   // 파일 존재 필수!
+
+      GEngine->GetCmdQueue()->WaitSync();
+  }
+
+  void Game::Update()
+  {
+      ...
+
+      Transform t;
+      t.offset = Vec4(0.f, 0.f, 0.f, 0.f);
+      mesh->SetTransform(t);
+      mesh->SetTexture(texture);    // Texture 지정
+      mesh->Render();
+
+      ...
+  }
+
+  ```
+
+- 결과
+
+  |                사각형 Mesh에 Texture 맵핑                 |
+  | :-------------------------------------------------------: |
+  | ![texture-mapping-result](res/texture-mapping-result.png) |
+
 ---
 
 ## Depth Stencil View
