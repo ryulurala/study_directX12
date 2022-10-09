@@ -7,11 +7,11 @@
 #include "RootSignature.h"
 #include "ConstantBuffer.h"
 #include "TableDescriptorHeap.h"
+#include "DepthStencilBuffer.h"
 
 void Engine::Init(const WindowInfo& window)
 {
 	_window = window;
-	ResizeWindow(window.width, window.height);
 
 	// 그려질 화면 크기 설정
 	_viewport = { 0, 0, static_cast<FLOAT>(window.width), static_cast<FLOAT>(window.height), 0.0f, 1.0f };
@@ -23,6 +23,7 @@ void Engine::Init(const WindowInfo& window)
 	_rootSignature = make_shared<RootSignature>();
 	_constantBuffer = make_shared<ConstantBuffer>();
 	_tableDescHeap = make_shared<TableDescriptorHeap>();
+	_depthStencilBuffer = make_shared<DepthStencilBuffer>();
 
 	_device->Init();
 	_cmdQueue->Init(_device->GetDevice(), _swapChain);
@@ -30,6 +31,9 @@ void Engine::Init(const WindowInfo& window)
 	_rootSignature->Init();
 	_constantBuffer->Init(sizeof(Transform), 256);
 	_tableDescHeap->Init(256);
+	_depthStencilBuffer->Init(window);
+
+	ResizeWindow(window.width, window.height);
 }
 
 void Engine::ResizeWindow(int32 width, int32 height)
@@ -40,6 +44,8 @@ void Engine::ResizeWindow(int32 width, int32 height)
 	RECT rect = { 0, 0, width, height };
 	::AdjustWindowRect(&rect, WS_OVERLAPPEDWINDOW, false);			// 윈도우 크기 조절
 	::SetWindowPos(_window.hwnd, 0, 100, 100, width, height, 0);	// 윈도우 위치 설정
+
+	_depthStencilBuffer->Init(_window);
 }
 
 void Engine::Render()

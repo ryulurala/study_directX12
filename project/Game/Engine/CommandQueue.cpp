@@ -7,6 +7,7 @@
 #include "Engine.h"
 #include "ConstantBuffer.h"
 #include "TableDescriptorHeap.h"
+#include "DepthStencilBuffer.h"
 
 CommandQueue::~CommandQueue()
 {
@@ -91,7 +92,11 @@ void CommandQueue::RenderBegin(const D3D12_VIEWPORT* vp, const D3D12_RECT* rect)
 	// GPU에게 결과물을 계산해달라고 요청 명령 삽입
 	D3D12_CPU_DESCRIPTOR_HANDLE backBufferView = _swapChain->GetBackRTV();
 	_cmdList->ClearRenderTargetView(backBufferView, Colors::LightSteelBlue, 0, nullptr);
-	_cmdList->OMSetRenderTargets(1, &backBufferView, FALSE, nullptr);
+
+	// 매 프레임마다 Depth Stencil Buffer 초기화 및 사용
+	D3D12_CPU_DESCRIPTOR_HANDLE depthStencilView = GEngine->GetDepthStencilBuffer()->GetDSVCpuHandle();
+	_cmdList->OMSetRenderTargets(1, &backBufferView, FALSE, &depthStencilView);
+	_cmdList->ClearDepthStencilView(depthStencilView, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
 }
 
 void CommandQueue::RenderEnd()
