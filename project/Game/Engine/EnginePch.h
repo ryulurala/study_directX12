@@ -100,6 +100,9 @@ struct WindowInfo
 #define RESOURCE_CMD_LIST	GEngine->GetCmdQueue()->GetResourceCmdList()
 #define ROOT_SIGNATURE		GEngine->GetRootSignature()->GetSignature()
 
+#define INPUT				GEngine->GetInput()
+#define DELTA_TIME			GEngine->GetTimer()->GetDeltaTime()
+
 extern unique_ptr<class Engine> GEngine;	// 외부 전역 변수 선언
 
 struct Vertex

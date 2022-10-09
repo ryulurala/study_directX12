@@ -8,6 +8,9 @@ class ConstantBuffer;
 class TableDescriptorHeap;
 class DepthStencilBuffer;
 
+class Input;
+class Timer;
+
 class Engine
 {
 public:
@@ -15,6 +18,9 @@ public:
 	void ResizeWindow(int32 width, int32 height);
 
 	void Render();		// 렌더링
+
+public:
+	void Update();
 
 public:
 	shared_ptr<Device> GetDevice() const { return _device; }
@@ -25,9 +31,15 @@ public:
 	shared_ptr<TableDescriptorHeap> GetTableDescHeap() const { return _tableDescHeap; }
 	shared_ptr<DepthStencilBuffer> GetDepthStencilBuffer() const { return _depthStencilBuffer; }
 
+	shared_ptr<Input> GetInput() const { return _input; }
+	shared_ptr<Timer> GetTimer() const { return _timer; }
+
 public:
 	void RenderBegin();		// Command Queue에 요청 사항 넣기
 	void RenderEnd();		// 쌓은 일감을 GPU에게 넘김
+
+private:
+	void ShowFps();
 
 private:
 	// 그려질 화면 크기 관련
@@ -42,5 +54,8 @@ private:
 	shared_ptr<ConstantBuffer> _constantBuffer;
 	shared_ptr<TableDescriptorHeap> _tableDescHeap;
 	shared_ptr<DepthStencilBuffer> _depthStencilBuffer;
+
+	shared_ptr<Input> _input;
+	shared_ptr<Timer> _timer;
 };
 

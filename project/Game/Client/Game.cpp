@@ -8,6 +8,9 @@
 #include "Shader.h"
 #include "Texture.h"
 
+#include "Input.h"
+#include "Timer.h"
+
 shared_ptr<Mesh> mesh = make_shared<Mesh>();
 shared_ptr<Shader> shader = make_shared<Shader>();
 shared_ptr<Texture> texture = make_shared<Texture>();
@@ -55,21 +58,23 @@ void Game::Init(const WindowInfo& window)
 
 void Game::Update()
 {
+	GEngine->Update();
+
 	GEngine->RenderBegin();
 
 	shader->Update();
 
 	{
-		Transform t;
-		t.offset = Vec4(0.25f, 0.25f, 0.1f, 0.f);
-		mesh->SetTransform(t);
-		mesh->SetTexture(texture);
-		mesh->Render();
-	}
+		static Transform t = {};
+		if (INPUT->GetButton(KEY_TYPE::W))
+			t.offset.y += 1.f * DELTA_TIME;
+		if(INPUT->GetButton(KEY_TYPE::S))
+			t.offset.y -= 1.f * DELTA_TIME;
+		if(INPUT->GetButton(KEY_TYPE::A))
+			t.offset.x -= 1.f * DELTA_TIME;
+		if(INPUT->GetButton(KEY_TYPE::D))
+			t.offset.x += 1.f * DELTA_TIME;
 
-	{
-		Transform t;
-		t.offset = Vec4(0.f, 0.f, 0.f, 0.f);
 		mesh->SetTransform(t);
 		mesh->SetTexture(texture);
 		mesh->Render();

@@ -9,6 +9,9 @@
 #include "TableDescriptorHeap.h"
 #include "DepthStencilBuffer.h"
 
+#include "Input.h"
+#include "Timer.h"
+
 void Engine::Init(const WindowInfo& window)
 {
 	_window = window;
@@ -24,6 +27,9 @@ void Engine::Init(const WindowInfo& window)
 	_constantBuffer = make_shared<ConstantBuffer>();
 	_tableDescHeap = make_shared<TableDescriptorHeap>();
 	_depthStencilBuffer = make_shared<DepthStencilBuffer>();
+	
+	_input = make_shared<Input>();
+	_timer = make_shared<Timer>();
 
 	_device->Init();
 	_cmdQueue->Init(_device->GetDevice(), _swapChain);
@@ -32,6 +38,9 @@ void Engine::Init(const WindowInfo& window)
 	_constantBuffer->Init(sizeof(Transform), 256);
 	_tableDescHeap->Init(256);
 	_depthStencilBuffer->Init(window);
+
+	_input->Init(window.hwnd);
+	_timer->Init();
 
 	ResizeWindow(window.width, window.height);
 }
@@ -57,6 +66,14 @@ void Engine::Render()
 	RenderEnd();
 }
 
+void Engine::Update()
+{
+	_input->Update();
+	_timer->Update();
+
+	ShowFps();
+}
+
 void Engine::RenderBegin()
 {
 	_cmdQueue->RenderBegin(&_viewport, &_scissorRect);
@@ -65,4 +82,14 @@ void Engine::RenderBegin()
 void Engine::RenderEnd()
 {
 	_cmdQueue->RenderEnd();
+}
+
+void Engine::ShowFps()
+{
+	uint32 fps = _timer->GetFps();
+
+	WCHAR text[100] = L"";
+	::wsprintf(text, L"FPS: %d", fps);
+
+	::SetWindowText(_window.hwnd, text);
 }
