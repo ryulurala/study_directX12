@@ -3526,4 +3526,304 @@ Table of Contents
 
 ## Depth Stencil View
 
+- Depth Stencil View
+
+  > Depth Buffer + Stencil Buffer: 2D Texture
+  >
+  > 깊이 값을 추적해 어떤 물체를 그려야 할 지를 정한다.
+
+  - Depth Buffer
+    > 가장 가깝게 보이는 정점의 "깊이 정보"를 저장하는 버퍼
+  - Stencil Buffer
+    > 특정 픽셀들이 후면 버퍼에 기록되지 않도록 하는 버퍼
+
+### Check Resterize: Vertexs' Z > 1
+
+- Game.cpp
+
+  > Vertex의 Z 값 수정
+
+  ```cpp
+  ...
+
+  void Game::Init(const WindowInfo& window)
+  {
+      GEngine->Init(window);
+
+      // Vertex buffer
+      vector<Vertex> vertexVec(4);
+      vertexVec[0].pos = Vec3(-0.5f, 0.5f, 1.5f);
+      vertexVec[0].color = Vec4(1.f, 0.f, 0.f, 1.f);
+      vertexVec[0].uv = Vec2(0.f, 0.f);
+      vertexVec[1].pos = Vec3(0.5f, 0.5f, 1.5f);
+      vertexVec[1].color = Vec4(0.f, 1.f, 0.f, 1.f);
+      vertexVec[1].uv = Vec2(1.f, 0.f);
+      vertexVec[2].pos = Vec3(0.5f, -0.5f, 1.5f);
+      vertexVec[2].color = Vec4(0.f, 0.f, 1.f, 1.f);
+      vertexVec[2].uv = Vec2(1.f, 1.f);
+      vertexVec[3].pos = Vec3(-0.5f, -0.5f, 1.5f);
+      vertexVec[3].color = Vec4(0.f, 1.f, 0.f, 1.f);
+      vertexVec[3].uv = Vec2(0.f, 1.f);
+
+      // Index buffer
+      ...
+  }
+
+  ...
+  ```
+
+- 결과
+
+  | Vertex의 Z값이 1을 초과하면 Rasterize 단게에서 걸러준다. |
+  | :------------------------------------------------------: |
+  |            ![vertex-z-1](res/vertex-z-1.png)             |
+
+### Mesh transform offset 사용
+
+- default.hlsli
+
+  > offset 추가
+
+  ```cpp
+  ...
+
+  VS_OUT VS_Main(VS_IN input)
+  {
+      VS_OUT output = (VS_OUT)0;
+
+      output.pos = float4(input.pos, 1.f);
+      output.pos += offset0;    // offset 추가
+      output.color = input.color;
+      output.uv = input.uv;
+
+      return output;
+  }
+
+  ...
+  ```
+
+### Depth Stencil Buffer 추가
+
+- DepthStencilBuffer.h
+
+  ```cpp
+  #pragma once
+  class DepthStencilBuffer
+  {
+  public:
+      void Init(const WindowInfo& window, DXGI_FORMAT dsvFormat = DXGI_FORMAT_D32_FLOAT);
+
+      D3D12_CPU_DESCRIPTOR_HANDLE GetDSVCpuHandle() const { return _dsvHandle; }
+      DXGI_FORMAT GetDSVFormat() const { return _dsvFormat; }
+
+  private:
+      ComPtr<ID3D12Resource>        _dsvBuffer;
+      ComPtr<ID3D12DescriptorHeap>  _dsvHeap;
+      D3D12_CPU_DESCRIPTOR_HANDLE   _dsvHandle = {};
+      DXGI_FORMAT                   _dsvFormat = {};  // depth와 stencil format
+  };
+
+  ```
+
+- DepthStencilBuffer.cpp
+
+  ```cpp
+  #include "pch.h"
+  #include "DepthStencilBuffer.h"
+
+  #include "Engine.h"
+  #include "Device.h"
+
+  void DepthStencilBuffer::Init(const WindowInfo& window, DXGI_FORMAT dsvFormat)
+  {
+      _dsvFormat = dsvFormat;
+
+      D3D12_HEAP_PROPERTIES heapProperty = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
+
+      // 화면 크기, 포맷
+      D3D12_RESOURCE_DESC desc = CD3DX12_RESOURCE_DESC::Tex2D(_dsvFormat, window.width, window.height);
+      desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+
+      // 매 프레임마다 초기화할 값 설정
+      D3D12_CLEAR_VALUE optimizedClearValue = CD3DX12_CLEAR_VALUE(_dsvFormat, 1.0f, 0);
+
+      DEVICE->CreateCommittedResource(
+          &heapProperty,
+          D3D12_HEAP_FLAG_NONE,
+          &desc,
+          D3D12_RESOURCE_STATE_DEPTH_WRITE,
+          &optimizedClearValue,
+          IID_PPV_ARGS(&_dsvBuffer)
+      );
+
+      // Descriptor Heap 생성
+      D3D12_DESCRIPTOR_HEAP_DESC heapDesc = {};
+      heapDesc.NumDescriptors = 1;
+      heapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+      heapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
+      DEVICE->CreateDescriptorHeap(&heapDesc, IID_PPV_ARGS(&_dsvHeap));
+
+      _dsvHandle = _dsvHeap->GetCPUDescriptorHandleForHeapStart();
+      DEVICE->CreateDepthStencilView(_dsvBuffer.Get(), nullptr, _dsvHandle);
+  }
+
+  ```
+
+- Engine.h
+
+  > Depah Stencil Buffer 변수 추가
+
+  ```cpp
+  ...
+  class DepthStencilBuffer;
+
+  class Engine
+  {
+  ...
+
+  public:
+      ...
+      shared_ptr<DepthStencilBuffer> GetDepthStencilBuffer() const { return _depthStencilBuffer; }
+
+  ...
+
+  private:
+      ...
+      shared_ptr<DepthStencilBuffer> _depthStencilBuffer;
+  };
+
+  ```
+
+- Engine.cpp
+
+  > Depah Stencil Buffer 초기화
+
+  ```cpp
+  ...
+  #include "DepthStencilBuffer.h"
+
+  void Engine::Init(const WindowInfo& window)
+  {
+      _window = window;
+
+      // 그려질 화면 크기 설정
+      _viewport = { 0, 0, static_cast<FLOAT>(window.width), static_cast<FLOAT>(window.height), 0.0f, 1.0f };
+      _scissorRect = CD3DX12_RECT(0, 0, window.width, window.height);
+
+      ...
+      _depthStencilBuffer = make_shared<DepthStencilBuffer>();
+
+      ...
+      _depthStencilBuffer->Init(window);
+
+      ResizeWindow(window.width, window.height);
+  }
+
+  void Engine::ResizeWindow(int32 width, int32 height)
+  {
+      ...
+
+      _depthStencilBuffer->Init(_window);
+  }
+
+  ...
+  ```
+
+### Depth Stencil Buffer 사용
+
+- CommandQueue.cpp
+
+  > Depth Stencil Buffer 매 프레임 초기화 및 사용
+
+  ```cpp
+  ...
+  #include "DepthStencilBuffer.h"
+
+  ...
+
+  void CommandQueue::RenderBegin(const D3D12_VIEWPORT* vp, const D3D12_RECT* rect)
+  {
+      ...
+      // 렌더할 버퍼 구체화.
+      // GPU에게 결과물을 계산해달라고 요청 명령 삽입
+      D3D12_CPU_DESCRIPTOR_HANDLE backBufferView = _swapChain->GetBackRTV();
+      _cmdList->ClearRenderTargetView(backBufferView, Colors::LightSteelBlue, 0, nullptr);
+
+      // 매 프레임마다 Depth Stencil Buffer 초기화 및 사용
+      D3D12_CPU_DESCRIPTOR_HANDLE depthStencilView = GEngine->GetDepthStencilBuffer()->GetDSVCpuHandle();
+      _cmdList->OMSetRenderTargets(1, &backBufferView, FALSE, &depthStencilView);
+      _cmdList->ClearDepthStencilView(depthStencilView, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+  }
+
+  ...
+  ```
+
+- Shader.cpp
+
+  > Depth Stencil Buffer 사용 묘사
+
+  ```cpp
+  ...
+  #include "DepthStencilBuffer.h"
+
+  void Shader::Init(const wstring& path)
+  {
+      ...
+      _pipelineDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+      _pipelineDesc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);  // 가까이 있는 걸 먼저 그린다.
+      _pipelineDesc.DSVFormat = GEngine->GetDepthStencilBuffer()->GetDSVFormat();   // format
+      // _pipelineDesc.DepthStencilState.DepthEnable = FALSE;
+      // _pipelineDesc.DepthStencilState.StencilEnable = FALSE;
+      ...
+
+      DEVICE->CreateGraphicsPipelineState(&_pipelineDesc, IID_PPV_ARGS(&_pipelineState));
+  }
+
+  ```
+
+### Mesh 2개로 결과 확인
+
+- Game.cpp
+
+  > 메시 2개 그리기
+
+  ```cpp
+  ...
+
+  void Game::Update()
+  {
+      GEngine->RenderBegin();
+
+      shader->Update();
+
+      {
+          Transform t;
+          t.offset = Vec4(0.25f, 0.25f, 0.1f, 0.f);   // 먼저 그려도 앞에 온다.(Z: 0.1)
+          mesh->SetTransform(t);
+          mesh->SetTexture(texture);
+          mesh->Render();
+      }
+
+      {
+          Transform t;
+          t.offset = Vec4(0.f, 0.f, 0.f, 0.f);    // Z: 0 이기 때문에 앞에 그려진 것에 덮어 씌워짐
+          mesh->SetTransform(t);
+          mesh->SetTexture(texture);
+          mesh->Render();
+      }
+
+      //GEngine->Render();
+
+      GEngine->RenderEnd();
+  }
+
+  ...
+  ```
+
+- 결과
+
+  | 깊이 값이 다른 이미지 출력(이전에는 먼저 그린 건 나중 그린 것에 덮어 씌워짐) |
+  | :--------------------------------------------------------------------------: |
+  |       ![depth-stencil-view-result](res/depth-stencil-view-result.png)        |
+
 ---
