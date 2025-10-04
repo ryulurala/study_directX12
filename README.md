@@ -1,4 +1,4 @@
-# study-directX12
+# study_directX12
 
 [Studying "game math" and "directX 12" with Inf-learn](https://inf.run/Hu5g)
 
